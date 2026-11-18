@@ -1,0 +1,86 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-cream-100 font-sans text-ink antialiased;
+    background-image:
+      radial-gradient(ellipse at 5% -5%, rgba(220, 203, 164, 0.4), transparent 48%),
+      radial-gradient(ellipse at 100% 8%, rgba(184, 192, 158, 0.3), transparent 42%);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    @apply bg-olive-200 text-olive-950;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-olive-500 ring-offset-2 ring-offset-cream-100;
+  }
+}
+
+@layer components {
+  .skip-link {
+    @apply fixed left-4 top-4 z-[100] -translate-y-24 rounded-lg bg-olive-950 px-4 py-3 text-sm font-semibold text-cream-50 shadow-lg transition-transform focus:translate-y-0;
+  }
+
+  .paper-card {
+    @apply rounded-2xl border border-olive-100/80 bg-white/85 shadow-card backdrop-blur-sm;
+  }
+
+  .input-base {
+    @apply w-full rounded-xl border border-olive-200 bg-white px-4 py-3 text-[15px] text-ink shadow-sm transition placeholder:text-ink-muted/60 hover:border-olive-300 focus:border-olive-500 focus:outline-none focus:ring-4 focus:ring-olive-500/10 disabled:cursor-not-allowed disabled:bg-cream-100 disabled:text-ink-muted;
+  }
+
+  .input-invalid {
+    @apply border-terracotta-400 focus:border-terracotta-500 focus:ring-terracotta-500/10;
+  }
+}
+
+/* O conteúdo da tela normal é ocultado na impressão; a versão A4 dedicada
+   permanece visível. */
+.print-only {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 16mm 15mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #111 !important;
+    font-size: 11pt;
+  }
+
+  .no-print,
+  .screen-only {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .print-recipe {
+    width: 100%;
+    color: #111;
+  }
+
+  .print-recipe a[href]::after {
+    content: none !important;
+  }
+
+  .print-avoid-break {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}
