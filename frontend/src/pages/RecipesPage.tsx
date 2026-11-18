@@ -178,6 +178,19 @@ export function RecipesPage() {
     return () => controller.abort();
   }, [reloadKey]);
 
+  // Uma página pode deixar de existir (receita excluída em outra aba, URL
+  // manual ou histórico do navegador). Sem isso, a tela mostraria "caderno em
+  // branco" mesmo havendo receitas em uma página anterior.
+  useEffect(() => {
+    if (isLoading || error || !recipes) return;
+
+    const lastPage = Math.max(recipes.meta.totalPages, 1);
+
+    if (page > lastPage) {
+      updateParams({ pagina: lastPage > 1 ? String(lastPage) : null }, { replace: true });
+    }
+  }, [isLoading, error, recipes, page, updateParams]);
+
   const reload = () => setReloadKey((current) => current + 1);
 
   const handlePageChange = (nextPage: number) => {

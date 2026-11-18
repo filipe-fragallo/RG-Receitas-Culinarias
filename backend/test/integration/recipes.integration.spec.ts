@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { Server } from 'node:http';
 import request from 'supertest';
+import { DataSource } from 'typeorm';
 
 import { AppModule } from '../../src/app.module';
 import { configureApp } from '../../src/app.setup';
@@ -58,6 +59,7 @@ const PASSWORD = 'Senha@123';
 describe('API de receitas (integração com MySQL)', () => {
   let app: INestApplication;
   let server: Server;
+  let dataSource: DataSource;
   let tokenA: string;
   let tokenB: string;
   let userA: AuthBody['user'];
@@ -103,6 +105,7 @@ describe('API de receitas (integração com MySQL)', () => {
     configureApp(app);
     await app.init();
     server = app.getHttpServer() as Server;
+    dataSource = app.get(DataSource);
 
     const authA = await register(loginA, 'Usuária A');
     const authB = await register(loginB, 'Usuário B');
@@ -139,6 +142,18 @@ describe('API de receitas (integração com MySQL)', () => {
     expect(body.statusCode).toBe(401);
     expect(body.message).toBeTruthy();
     expect(body.path).toBe('/api/recipes');
+  });
+
+  it('armazena a senha somente como hash bcrypt', async () => {
+    const rows = await dataSource.query<{ senha: string }[]>(
+      'SELECT senha FROM usuarios WHERE login = ?',
+      [loginA],
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].senha).toMatch(/^\$2[aby]\$/);
+    expect(rows[0].senha).not.toBe(PASSWORD);
+    expect(rows[0].senha.length).toBeGreaterThan(50);
   });
 
   it('rejeita login duplicado com 409', async () => {
@@ -289,6 +304,22 @@ describe('API de receitas (integração com MySQL)', () => {
     const sortedBody = sorted.body as PaginatedRecipesBody;
     expect(sortedBody.data).toHaveLength(2);
     expect(sortedBody.data[0].nome).toBe('Bolo de cenoura integração');
+
+    // % e _ não podem funcionar como curingas de LIKE.
+    for (const term of ['%', '_', "' OR 1=1 -- "]) {
+      const wildcard = await request(server)
+        .get(`/api/recipes?search=${encodeURIComponent(term)}`)
+        .set(auth(tokenA))
+        .expect(200);
+
+      expect((wildcard.body as PaginatedRecipesBody).meta.total).toBe(0);
+    }
+  });
+
+  it('responde em português a um identificador inválido', async () => {
+    const response = await request(server).get('/api/recipes/abc').set(auth(tokenA)).expect(400);
+
+    expect((response.body as ErrorBody).message).toBe('Identificador da receita inválido.');
   });
 
   it('consulta e edita a própria receita', async () => {

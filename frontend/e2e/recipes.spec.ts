@@ -61,6 +61,14 @@ test.describe('Fluxo principal de receitas', () => {
       page.getByRole('link', { name: `Ver detalhes da receita ${recipeName}` }),
     ).toBeVisible();
 
+    // Página fora do intervalo volta para uma página válida em vez de exibir
+    // "caderno em branco" com receitas existentes.
+    await page.goto('/?pagina=99');
+    await expect(page).toHaveURL('/');
+    await expect(
+      page.getByRole('link', { name: `Ver detalhes da receita ${recipeName}` }),
+    ).toBeVisible();
+
     // Detalhes + edição
     await page.getByRole('link', { name: `Ver detalhes da receita ${recipeName}` }).click();
     await page.getByRole('link', { name: 'Editar' }).click();

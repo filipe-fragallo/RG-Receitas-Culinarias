@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -31,6 +32,11 @@ import { QueryRecipesDto } from './dto/query-recipes.dto';
 import { PaginatedRecipesDto, RecipeResponseDto, RecipeStatsDto } from './dto/recipe-response.dto';
 import { UpdateRecipeDto } from './dto/update-recipe.dto';
 import { RecipesService } from './recipes.service';
+
+/** Mantém a mensagem de ID inválido no mesmo idioma do restante da API. */
+const recipeIdPipe = new ParseIntPipe({
+  exceptionFactory: () => new BadRequestException('Identificador da receita inválido.'),
+});
 
 @ApiTags('Receitas')
 @ApiBearerAuth('access-token')
@@ -69,7 +75,7 @@ export class RecipesController {
   @ApiNotFoundResponse({ description: 'Receita inexistente ou pertencente a outro usuário.' })
   findOne(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', recipeIdPipe) id: number,
   ): Promise<RecipeResponseDto> {
     return this.recipesService.findOne(user.id, id);
   }
@@ -78,7 +84,8 @@ export class RecipesController {
   @ApiOperation({
     summary: 'Cadastra uma receita',
     description:
-      'O proprietário é sempre o usuário do token; qualquer ID de usuário enviado é ignorado.',
+      'O proprietário é sempre o usuário do token. Campos como idUsuarios não fazem parte ' +
+      'do contrato e são rejeitados pela validação.',
   })
   @ApiCreatedResponse({ description: 'Receita criada.', type: RecipeResponseDto })
   @ApiBadRequestResponse({ description: 'Dados inválidos ou categoria inexistente.' })
@@ -97,7 +104,7 @@ export class RecipesController {
   @ApiNotFoundResponse({ description: 'Receita inexistente ou pertencente a outro usuário.' })
   update(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', recipeIdPipe) id: number,
     @Body() dto: UpdateRecipeDto,
   ): Promise<RecipeResponseDto> {
     return this.recipesService.update(user.id, id, dto);
@@ -111,7 +118,7 @@ export class RecipesController {
   @ApiNotFoundResponse({ description: 'Receita inexistente ou pertencente a outro usuário.' })
   async remove(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', recipeIdPipe) id: number,
   ): Promise<void> {
     await this.recipesService.remove(user.id, id);
   }

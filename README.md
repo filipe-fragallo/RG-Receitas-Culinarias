@@ -297,7 +297,8 @@ npm run test:integration
 O `globalSetup` recria o banco `teste_receitas_rg_sistemas_test` a partir do **mesmo SQL** do
 Docker (substituindo apenas o nome do schema), garantindo constraints e categorias reais. Os testes
 exercitam o pipeline HTTP completo e incluem o cenário **Usuário A x Usuário B**: B recebe 404 ao
-tentar ler, editar e excluir uma receita de A.
+tentar ler, editar e excluir uma receita de A. Também conferem no banco que a senha é um hash bcrypt,
+que `%`/`_` não viram curingas de busca e que IDs inválidos retornam mensagem em português.
 
 Credenciais padrão: `root`/`root` em `127.0.0.1:3306`. Para outro MySQL, defina `DB_HOST`,
 `DB_PORT`, `DB_USER`, `DB_PASSWORD` e `DB_NAME` no ambiente.
@@ -311,8 +312,8 @@ npm run test:e2e
 ```
 
 O fluxo cobre: cadastro → criação de receita → pesquisa → resultado vazio → limpar filtros →
-detalhe → edição → acionamento da impressão → exclusão com confirmação → logout → rota privada
-redirecionando para o login.
+paginação fora do intervalo → detalhe → edição → acionamento da impressão → exclusão com confirmação
+→ logout → rota privada redirecionando para o login.
 
 Por padrão o Playwright sobe backend e frontend de desenvolvimento. Para testar o pacote Docker:
 
@@ -327,7 +328,7 @@ E2E_BASE_URL=http://localhost:8080 npm run test:e2e
 | Verificação | Resultado |
 | --- | --- |
 | `backend npm test` | 3 suítes, 23 testes aprovados |
-| `backend npm run test:integration` | 1 suíte, 12 testes aprovados |
+| `backend npm run test:integration` | 1 suíte, 14 testes aprovados |
 | `frontend npm run test:e2e` (dev) | 1 fluxo aprovado |
 | `E2E_BASE_URL=http://localhost:8080 npm run test:e2e` | 1 fluxo aprovado no Docker/Nginx |
 | `backend npm run lint:check` | sem erros |

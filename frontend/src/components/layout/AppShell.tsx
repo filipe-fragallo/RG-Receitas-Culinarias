@@ -31,7 +31,7 @@ export function AppShell() {
 
   return (
     <div className="min-h-screen lg:pl-72">
-      <a href="#conteudo" className="skip-link">
+      <a href="#conteudo" className="skip-link no-print">
         Pular para o conteúdo
       </a>
 

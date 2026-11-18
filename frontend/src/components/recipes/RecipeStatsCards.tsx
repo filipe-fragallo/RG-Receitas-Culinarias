@@ -50,7 +50,9 @@ export function RecipeStatsCards({ stats, isLoading }: RecipeStatsCardsProps) {
             {isLoading ? (
               <Skeleton className="mt-1 h-5 w-16" />
             ) : (
-              <p className="mt-0.5 truncate font-display text-xl font-semibold text-ink">{value}</p>
+              <p className="mt-0.5 font-display text-lg font-semibold leading-tight text-ink sm:text-xl">
+                {value}
+              </p>
             )}
           </div>
         </div>

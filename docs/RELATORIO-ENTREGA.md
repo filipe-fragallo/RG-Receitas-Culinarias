@@ -2,7 +2,7 @@
 
 **Desafio:** RG Receitas Culinárias
 **Aplicação:** Meu Caderno de Receitas
-**Data da verificação:** 17/11/2026
+**Data da verificação:** 18/11/2026
 **Ambiente:** macOS 15.7.8 (arm64), Docker Compose v2.31, Node 22, Chromium via Playwright
 
 ---
@@ -70,7 +70,7 @@ open http://localhost:8080
 | Impressão A4 | ✅ | `@media print` + `print-recipe` |
 | Swagger em `/api/docs` | ✅ | UI e JSON disponíveis |
 | Testes unitários | ✅ | 23 testes Jest |
-| Testes de integração | ✅ | 12 testes Supertest + MySQL real |
+| Testes de integração | ✅ | 14 testes Supertest + MySQL real |
 | Isolamento Usuário A/B | ✅ | teste dedicado: GET/PATCH/DELETE de B → 404 |
 | E2E Playwright | ✅ | fluxo completo em Chromium |
 | Loading / toasts / vazios | ✅ | skeletons, `ToastProvider`, `EmptyState` |
@@ -168,7 +168,7 @@ permitido alterar o schema, o backend preenche `criado_em`/`alterado_em` via hoo
 
 ## 6. Resultados de testes e qualidade
 
-Executados neste ambiente em 17/11/2026.
+Executados neste ambiente em 17 e 18/11/2026.
 
 ### 6.1 Backend — unitários
 
@@ -189,12 +189,13 @@ validação de DTOs, criação de receita, categoria inexistente, ownership, upd
 ```text
 PASS test/integration/recipes.integration.spec.ts
 
-Tests: 12 passed, 12 total
+Tests: 14 passed, 14 total
 ```
 
 Cenários:
 
 - rota privada sem token → 401 padronizado;
+- senha gravada apenas como hash bcrypt (verificado direto na tabela `usuarios`);
 - cadastro duplicado (case-insensitive) → 409;
 - validação de cadastro/senhas → 400;
 - login válido e inválido;
@@ -202,6 +203,8 @@ Cenários:
 - criação com dono do token e rejeição de `idUsuarios` forjado;
 - validação de campos e categoria inexistente;
 - pesquisa, filtro e ordenação no banco;
+- `%`, `_` e tentativa de injeção SQL na busca não retornam registros indevidos;
+- identificador não numérico retorna 400 com mensagem em português;
 - detalhe e edição da própria receita;
 - **Usuário B recebe 404 em GET, PATCH e DELETE da receita do Usuário A**;
 - exclusão e estatísticas zeradas;
@@ -227,8 +230,8 @@ E2E_BASE_URL=http://localhost:8080
 ```
 
 Fluxo coberto: cadastro → login automático → criação → pesquisa com resultado → busca sem
-resultado → limpar filtros → detalhe → edição → acionamento de `window.print()` → exclusão com
-confirmação → logout → acesso a rota privada redirecionando ao login.
+resultado → limpar filtros → página fora do intervalo → detalhe → edição → acionamento de
+`window.print()` → exclusão com confirmação → logout → acesso a rota privada redirecionando ao login.
 
 ### 6.4 Build, lint e formatação
 
@@ -329,7 +332,38 @@ Não há pendências bloqueantes. Itens fora do escopo, conscientemente não imp
 
 ---
 
-## 11. Considerações finais
+## 11. Revisão técnica final
+
+Antes da entrega foi feita uma revisão adversarial com leitura completa do código, testes manuais de
+segurança contra a API em execução, geração de PDFs de impressão, inspeção visual em desktop, tablet
+e celular, e reinstalação total do Docker (`down -v` + `up --build`).
+
+### Correções aplicadas
+
+| Severidade | Problema encontrado | Correção |
+| --- | --- | --- |
+| Importante | O skip link "Pular para o conteúdo" aparecia no PDF impresso, sobre a lista de ingredientes. | Aplicada a classe `no-print` ao link no `AppShell`. Validado em PDF real de 1 e 4 páginas. |
+| Importante | Uma URL com página fora do intervalo (ex.: `?pagina=99`) exibia "Seu caderno está em branco" mesmo havendo receitas. | Efeito de página em `RecipesPage` redireciona para a última página válida; coberto no E2E. |
+| Importante | No tablet (768 px), a data de "Última atualização" era truncada com reticências. | Removido `truncate`; o valor quebra linha com `leading-tight` e fonte responsiva. |
+| Importante | `MYSQL_DATABASE` era configurável no Compose, mas o SQL de init e o `DB_NAME` usam o nome fixo do desafio; alterar a variável apontaria o backend para um banco vazio. | Nome do banco fixado em `teste_receitas_rg_sistemas` no Compose e removido do `.env.example`, com comentário explicativo. |
+| Opcional | O Swagger dizia que `idUsuarios` era "ignorado", mas a API o rejeita com 400. | Descrição corrigida para refletir o comportamento real. |
+| Opcional | ID não numérico retornava mensagem em inglês do `ParseIntPipe`. | Pipe customizado com "Identificador da receita inválido.", coberto por teste de integração. |
+
+### Verificações destrutivas e de comportamento
+
+- Instalação limpa: volume removido, `docker compose up -d --build` recriou 3 tabelas, 13 categorias
+  e nenhum usuário.
+- Persistência: `docker compose restart` e `docker compose down`/`up` mantiveram usuários, receitas
+  e categorias, sem reexecutar o seed.
+- Segurança: 26 verificações manuais (IDOR A/B, token expirado/forjado/`alg:none`, hash não exposto,
+  campo `idUsuarios` rejeitado, curingas e injeção SQL na busca, limites de paginação, JSON malformado)
+  passaram sem falhas.
+- Impressão: receita curta gerou 1 página; receita com 34 ingredientes e 20 etapas gerou 4 páginas,
+  com todo o conteúdo extraído do PDF, sem cortes e sem elementos de interface.
+- Responsividade: sem overflow horizontal em 390 px nas telas de lista, formulário e detalhe.
+- Sessão expirada: token inválido limpa o `localStorage`, redireciona ao login e exibe toast.
+
+## 12. Considerações finais
 
 A entrega prioriza fidelidade ao schema original, isolamento de dados por usuário e uma experiência
 de uso cuidada. O código está organizado por domínio, com validação consistente no cliente e no
