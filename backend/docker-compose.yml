@@ -1,0 +1,131 @@
+# Fluxo de desenvolvimento (MySQL apenas):
+#   cd backend && cp .env.example .env && docker compose up -d
+#
+# Stack completa (MySQL + API + frontend):
+#   cd backend && docker compose --profile full up -d --build
+#
+# As portas publicadas no host são configuráveis em backend/.env. As portas
+# internas dos containers permanecem 3306 (MySQL), 3000 (API) e 80 (Nginx).
+# O nome padrão do projeto pode ser substituído por `-p <projeto>` para isolar
+# containers, rede e volume em validações paralelas.
+
+name: receitas-rg-sistemas
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${DB_NAME:-teste_receitas_rg_sistemas}
+      MYSQL_USER: ${DB_USER:-receitas}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-receitas_dev}
+    ports:
+      # Somente loopback: MySQL é acessível ao host e aos vizinhos da rede
+      # interna, mas não é exposto à rede externa.
+      - "127.0.0.1:${MYSQL_HOST_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  # Etapa explícita e idempotente de schema. A API em produção não aplica
+  # migrations no bootstrap; o Compose autoriza apenas este serviço one-shot.
+  migrate:
+    profiles: ["full"]
+    build:
+      context: .
+    restart: "no"
+    environment:
+      NODE_ENV: production
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:-receitas}
+      DB_PASSWORD: ${DB_PASSWORD:-receitas_dev}
+      DB_NAME: ${DB_NAME:-teste_receitas_rg_sistemas}
+      DB_ALLOW_REMOTE: "true"
+      DB_ALLOWED_HOST: mysql
+      DB_ALLOW_PRODUCTION_MIGRATIONS: "true"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    # A imagem de runtime não tem ts-node: usa o CLI compilado em dist/.
+    command: ["node", "dist/database/cli.js", "up"]
+
+  backend:
+    profiles: ["full"]
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:-receitas}
+      DB_PASSWORD: ${DB_PASSWORD:-receitas_dev}
+      DB_NAME: ${DB_NAME:-teste_receitas_rg_sistemas}
+      # Sem fallback: em NODE_ENV=production o segredo precisa ser explícito.
+      # Um valor vazio é recusado pela validação Joi antes de iniciar a API.
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_EXPIRES_IN_SECONDS: ${JWT_EXPIRES_IN_SECONDS:-3600}
+      # Cookies de sessão: HttpOnly, Path=/api, sem Domain. Secure é obrigatório
+      # em produção; em localhost o Chromium aceita Secure mesmo em HTTP.
+      COOKIE_SECURE: "true"
+      COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-lax}
+      # O Nginx de frontend é o proxy imediato; apenas ele pode informar o IP
+      # real. X-Forwarded-For enviado diretamente pelo cliente não é confiável.
+      TRUST_PROXY: "true"
+      TRUST_PROXY_HOPS: "1"
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000,http://localhost:${FRONTEND_HOST_PORT:-8080},http://localhost:5173}
+      LOGIN_RATE_LIMIT_LIMIT: ${LOGIN_RATE_LIMIT_LIMIT:-5}
+      LOGIN_RATE_LIMIT_TTL_MS: ${LOGIN_RATE_LIMIT_TTL_MS:-60000}
+      REGISTER_RATE_LIMIT_LIMIT: ${REGISTER_RATE_LIMIT_LIMIT:-3}
+      REGISTER_RATE_LIMIT_TTL_MS: ${REGISTER_RATE_LIMIT_TTL_MS:-3600000}
+    ports:
+      # Porta interna do NestJS permanece 3000. A publicação direta no host é
+      # apenas para depuração local: TRUST_PROXY=true aceita X-Forwarded-For do
+      # proxy imediato, por isso a porta não pode ficar aberta na rede.
+      # O frontend continua acessando a API pela rede interna do Docker.
+      - "127.0.0.1:${BACKEND_HOST_PORT:-3001}:3000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  frontend:
+    profiles: ["full"]
+    build:
+      context: ../frontend
+      args:
+        VITE_API_URL: /api
+    restart: unless-stopped
+    ports:
+      # O Nginx continua ouvindo na porta 80 dentro do container.
+      - "${FRONTEND_HOST_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  mysql_data:

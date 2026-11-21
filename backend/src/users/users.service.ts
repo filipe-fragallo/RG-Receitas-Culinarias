@@ -1,51 +1,45 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectModel } from '@nestjs/sequelize';
 
+import { User } from '../database/models/user.model';
 import { PublicUser } from './user.types';
-import { User } from './user.entity';
 
 interface CreateUserData {
-  nome: string;
+  name: string;
   login: string;
-  senha: string;
+  passwordHash: string;
 }
 
 @Injectable()
 export class UsersService {
-  constructor(
-    @InjectRepository(User)
-    private readonly usersRepository: Repository<User>,
-  ) {}
+  constructor(@InjectModel(User) private readonly userModel: typeof User) {}
 
-  /** Busca por login. O hash só é selecionado quando explicitamente necessário. */
+  /**
+   * Busca por login. O hash só é carregado quando `includePassword` é true:
+   * o escopo padrão do model exclui a coluna `senha`.
+   */
   async findByLogin(login: string, includePassword = false): Promise<User | null> {
-    const query = this.usersRepository
-      .createQueryBuilder('usuario')
-      .where('usuario.login = :login', { login });
-
     if (includePassword) {
-      query.addSelect('usuario.senha');
+      return this.userModel.unscoped().findOne({ where: { login } });
     }
 
-    return query.getOne();
+    return this.userModel.findOne({ where: { login } });
   }
 
   async findById(id: number): Promise<User | null> {
-    return this.usersRepository.findOne({ where: { id } });
+    return this.userModel.findByPk(id);
   }
 
   async create(data: CreateUserData): Promise<User> {
-    const user = this.usersRepository.create(data);
-    return this.usersRepository.save(user);
+    return this.userModel.create({ ...data });
   }
 
   toPublic(user: User): PublicUser {
     return {
       id: user.id,
-      nome: user.nome,
+      name: user.name,
       login: user.login,
-      criadoEm: user.criadoEm,
+      createdAt: user.createdAt,
     };
   }
 }

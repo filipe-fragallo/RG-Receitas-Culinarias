@@ -5,7 +5,7 @@ export class RecipeCategoryDto {
   id!: number;
 
   @ApiProperty({ example: 'Bolos e tortas doces', nullable: true })
-  nome!: string | null;
+  name!: string | null;
 }
 
 export class RecipeResponseDto {
@@ -13,28 +13,28 @@ export class RecipeResponseDto {
   id!: number;
 
   @ApiProperty({ example: 'Bolo de cenoura com cobertura', nullable: true })
-  nome!: string | null;
+  name!: string | null;
 
   @ApiProperty({ type: RecipeCategoryDto, nullable: true })
-  categoria!: RecipeCategoryDto | null;
+  category!: RecipeCategoryDto | null;
 
   @ApiProperty({ example: 45, nullable: true })
-  tempoPreparoMinutos!: number | null;
+  preparationTimeMinutes!: number | null;
 
   @ApiProperty({ example: 8, nullable: true })
-  porcoes!: number | null;
+  servings!: number | null;
 
   @ApiProperty({ example: '3 cenouras médias\n3 ovos', nullable: true })
-  ingredientes!: string | null;
+  ingredients!: string | null;
 
   @ApiProperty({ example: 'Bata as cenouras e misture os secos.' })
-  modoPreparo!: string;
+  instructions!: string;
 
   @ApiProperty({ example: '2026-01-15T12:00:00.000Z', format: 'date-time' })
-  criadoEm!: Date;
+  createdAt!: Date;
 
   @ApiProperty({ example: '2026-01-15T12:30:00.000Z', format: 'date-time' })
-  alteradoEm!: Date;
+  updatedAt!: Date;
 }
 
 export class PaginationMetaDto {
@@ -61,10 +61,10 @@ export class PaginatedRecipesDto {
 
 export class RecipeStatsDto {
   @ApiProperty({ example: 12 })
-  totalReceitas!: number;
+  totalRecipes!: number;
 
   @ApiProperty({ example: 5, description: 'Quantidade de categorias distintas usadas.' })
-  categoriasUtilizadas!: number;
+  categoriesUsed!: number;
 
   @ApiProperty({
     example: '2026-01-15T12:30:00.000Z',
@@ -72,5 +72,5 @@ export class RecipeStatsDto {
     nullable: true,
     description: 'Última alteração entre as receitas do usuário.',
   })
-  atualizadaEm!: Date | null;
+  lastUpdatedAt!: Date | null;
 }

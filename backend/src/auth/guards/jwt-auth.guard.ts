@@ -1,27 +1,43 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
-import { JwtService } from '@nestjs/jwt';
+import { Request } from 'express';
 
 import { IS_PUBLIC_KEY } from '../../common/decorators/public.decorator';
+import { AuthenticatedSession } from '../../common/interfaces/authenticated-user.interface';
+import { getAllowedOrigins } from '../../config/app-origins';
+import { AuthService } from '../auth.service';
 import {
-  AuthenticatedUser,
-  JwtPayload,
-} from '../../common/interfaces/authenticated-user.interface';
+  AUTH_COOKIE_NAME,
+  CSRF_COOKIE_NAME,
+  CSRF_HEADER_NAME,
+  timingSafeEqualText,
+} from '../auth-cookies';
 
-interface RequestWithUser {
-  headers: { authorization?: string };
-  user?: AuthenticatedUser;
+interface RequestWithSession extends Request {
+  cookies: Record<string, string | undefined>;
+  user?: AuthenticatedSession;
 }
 
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
 /**
- * Guard global: por padrão todas as rotas exigem JWT.
- * Rotas explicitamente anotadas com @Public() ficam abertas.
+ * Guard global: por padrão todas as rotas exigem uma sessão persistida no
+ * cookie HttpOnly. Rotas @Public() ficam abertas, mas requisições que
+ * modificam dados continuam sujeitas à verificação de origem e CSRF.
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
-    private readonly jwtService: JwtService,
+    private readonly authService: AuthService,
     private readonly reflector: Reflector,
+    private readonly configService: ConfigService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -30,35 +46,57 @@ export class JwtAuthGuard implements CanActivate {
       context.getClass(),
     ]);
 
-    if (isPublic) {
-      return true;
+    const request = context.switchToHttp().getRequest<RequestWithSession>();
+    const token = request.cookies?.[AUTH_COOKIE_NAME];
+    let session: AuthenticatedSession | null = null;
+
+    if (!isPublic) {
+      if (!token) {
+        throw new UnauthorizedException('Sessão não informada. Entre novamente.');
+      }
+      session = await this.authService.validateToken(token);
+      request.user = session;
+    } else if (token) {
+      // Sessão inválida em rota pública não bloqueia login/cadastro: apenas
+      // impede que ela seja usada como base para o token CSRF.
+      try {
+        session = await this.authService.validateToken(token);
+      } catch {
+        session = null;
+      }
     }
 
-    const request = context.switchToHttp().getRequest<RequestWithUser>();
-    const [scheme, token] = request.headers.authorization?.split(' ') ?? [];
-
-    if (scheme !== 'Bearer' || !token) {
-      throw new UnauthorizedException('Token de autenticação não informado.');
+    if (!SAFE_METHODS.has(request.method)) {
+      this.validateCsrf(request, session);
     }
-
-    let payload: JwtPayload;
-
-    try {
-      payload = await this.jwtService.verifyAsync<JwtPayload>(token);
-    } catch {
-      throw new UnauthorizedException('Sessão expirada ou token inválido.');
-    }
-
-    if (typeof payload.sub !== 'number' || typeof payload.login !== 'string') {
-      throw new UnauthorizedException('Token inválido.');
-    }
-
-    request.user = {
-      id: payload.sub,
-      login: payload.login,
-      nome: payload.nome ?? null,
-    };
 
     return true;
+  }
+
+  private validateCsrf(request: RequestWithSession, session: AuthenticatedSession | null): void {
+    const origin = request.headers.origin;
+
+    if (origin && !getAllowedOrigins(this.configService).includes(origin)) {
+      throw new ForbiddenException('Origem não permitida.');
+    }
+
+    const cookieToken = request.cookies?.[CSRF_COOKIE_NAME];
+    const headerToken = request.headers[CSRF_HEADER_NAME];
+
+    if (
+      typeof cookieToken !== 'string' ||
+      typeof headerToken !== 'string' ||
+      cookieToken.length < 32 ||
+      !timingSafeEqualText(cookieToken, headerToken)
+    ) {
+      throw new ForbiddenException('Requisição inválida. Recarregue a página e tente novamente.');
+    }
+
+    if (session) {
+      const expected = this.authService.csrfTokenFor(session.jti);
+      if (!timingSafeEqualText(cookieToken, expected)) {
+        throw new ForbiddenException('Requisição inválida. Recarregue a página e tente novamente.');
+      }
+    }
   }
 }

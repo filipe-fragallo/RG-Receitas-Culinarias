@@ -13,19 +13,19 @@ export function RecipeStatsCards({ stats, isLoading }: RecipeStatsCardsProps) {
   const items = [
     {
       label: 'Receitas no caderno',
-      value: stats ? String(stats.totalReceitas) : '—',
+      value: stats ? String(stats.totalRecipes) : '—',
       icon: BookOpenText,
       accent: 'bg-olive-100 text-olive-700',
     },
     {
       label: 'Categorias utilizadas',
-      value: stats ? String(stats.categoriasUtilizadas) : '—',
+      value: stats ? String(stats.categoriesUsed) : '—',
       icon: Tags,
       accent: 'bg-terracotta-50 text-terracotta-700',
     },
     {
       label: 'Última atualização',
-      value: stats?.atualizadaEm ? formatDate(stats.atualizadaEm) : '—',
+      value: stats?.lastUpdatedAt ? formatDate(stats.lastUpdatedAt) : '—',
       icon: CalendarClock,
       accent: 'bg-cream-200 text-ink-soft',
     },

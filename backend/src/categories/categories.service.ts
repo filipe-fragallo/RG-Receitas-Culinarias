@@ -1,21 +1,20 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectModel } from '@nestjs/sequelize';
 
-import { Category } from './category.entity';
+import { Category } from '../database/models/category.model';
 
 @Injectable()
 export class CategoriesService {
-  constructor(
-    @InjectRepository(Category)
-    private readonly categoriesRepository: Repository<Category>,
-  ) {}
+  constructor(@InjectModel(Category) private readonly categoryModel: typeof Category) {}
 
   async findAll(): Promise<Category[]> {
-    return this.categoriesRepository.find({ order: { nome: 'ASC' } });
+    return this.categoryModel.findAll({
+      attributes: ['id', 'name'],
+      order: [['name', 'ASC']],
+    });
   }
 
   async findById(id: number): Promise<Category | null> {
-    return this.categoriesRepository.findOne({ where: { id } });
+    return this.categoryModel.findByPk(id);
   }
 }

@@ -1,0 +1,30 @@
+# Dependências
+node_modules/
+
+# Build, cobertura e cache do Vite
+dist/
+coverage/
+.vite/
+
+# Ambiente local (nunca versionar credenciais)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Testes E2E
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Sistema operacional / editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp

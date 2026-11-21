@@ -1,18 +1,15 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { Repository } from 'typeorm';
 
 import { CategoriesService } from '../categories/categories.service';
-import { Category } from '../categories/category.entity';
+import { Category } from '../database/models/category.model';
+import { Recipe } from '../database/models/recipe.model';
 import { CreateRecipeDto } from './dto/create-recipe.dto';
-import { Recipe } from './recipe.entity';
 import { RecipesService } from './recipes.service';
 
-interface RepositoryMock {
+interface RecipeModelMock {
   create: jest.Mock;
-  save: jest.Mock;
   findOne: jest.Mock;
-  remove: jest.Mock;
-  createQueryBuilder: jest.Mock;
+  findAndCountAll: jest.Mock;
 }
 
 interface CategoriesServiceMock {
@@ -20,47 +17,71 @@ interface CategoriesServiceMock {
   findAll: jest.Mock;
 }
 
-const category: Category = { id: 1, nome: 'Bolos e tortas doces', receitas: [] };
+interface FakeRecipe {
+  id: number;
+  userId: number;
+  categoryId: number | null;
+  name: string | null;
+  preparationTimeMinutes: number | null;
+  servings: number | null;
+  ingredients: string | null;
+  instructions: string;
+  createdAt: Date;
+  updatedAt: Date;
+  category: Category | null;
+  save: jest.Mock;
+  destroy: jest.Mock;
+}
 
-const makeRecipe = (overrides: Partial<Recipe> = {}): Recipe =>
-  Object.assign(new Recipe(), {
+const category = { id: 1, name: 'Bolos e tortas doces' } as Category;
+
+const makeRecipe = (overrides: Partial<FakeRecipe> = {}): FakeRecipe => {
+  const recipe = {
     id: 10,
-    idUsuarios: 7,
-    idCategorias: 1,
-    nome: 'Bolo de cenoura',
-    tempoPreparoMinutos: 45,
-    porcoes: 8,
-    ingredientes: '3 cenouras\n3 ovos',
-    modoPreparo: 'Bata e asse.',
-    criadoEm: new Date('2026-01-01T10:00:00.000Z'),
-    alteradoEm: new Date('2026-01-01T10:00:00.000Z'),
-    usuario: undefined as unknown as Recipe['usuario'],
-    categoria: category,
-    ...overrides,
-  });
+    userId: 7,
+    categoryId: 1,
+    name: 'Bolo de cenoura',
+    preparationTimeMinutes: 45,
+    servings: 8,
+    ingredients: '3 cenouras\n3 ovos',
+    instructions: 'Bata e asse.',
+    createdAt: new Date('2026-01-01T10:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T10:00:00.000Z'),
+    category,
+    save: jest.fn().mockResolvedValue(undefined),
+    destroy: jest.fn().mockResolvedValue(undefined),
+  };
+
+  return Object.assign(recipe, overrides);
+};
 
 const makeCreateDto = (overrides: Partial<CreateRecipeDto> = {}): CreateRecipeDto => ({
-  nome: 'Bolo de cenoura',
-  categoriaId: 1,
-  tempoPreparoMinutos: 45,
-  porcoes: 8,
-  ingredientes: '3 cenouras\n3 ovos',
-  modoPreparo: 'Bata e asse.',
+  name: 'Bolo de cenoura',
+  categoryId: 1,
+  preparationTimeMinutes: 45,
+  servings: 8,
+  ingredients: '3 cenouras\n3 ovos',
+  instructions: 'Bata e asse.',
   ...overrides,
 });
 
+const CATEGORY_INCLUDE = {
+  model: Category,
+  as: 'category',
+  attributes: ['id', 'name'],
+  required: false,
+};
+
 describe('RecipesService', () => {
   let service: RecipesService;
-  let repository: RepositoryMock;
+  let recipeModel: RecipeModelMock;
   let categoriesService: CategoriesServiceMock;
 
   beforeEach(() => {
-    repository = {
-      create: jest.fn((data: Partial<Recipe>) => data),
-      save: jest.fn(),
+    recipeModel = {
+      create: jest.fn(),
       findOne: jest.fn(),
-      remove: jest.fn(),
-      createQueryBuilder: jest.fn(),
+      findAndCountAll: jest.fn(),
     };
     categoriesService = {
       findById: jest.fn().mockResolvedValue(category),
@@ -68,115 +89,159 @@ describe('RecipesService', () => {
     };
 
     service = new RecipesService(
-      repository as unknown as Repository<Recipe>,
+      recipeModel as unknown as typeof Recipe,
       categoriesService as unknown as CategoriesService,
     );
   });
 
   describe('create', () => {
-    it('define o dono a partir do usuário autenticado', async () => {
-      repository.save.mockResolvedValue(makeRecipe());
-      repository.findOne.mockResolvedValue(makeRecipe());
+    it('sets the owner from the authenticated user', async () => {
+      const recipe = makeRecipe();
+      recipeModel.create.mockResolvedValue(recipe);
+      recipeModel.findOne.mockResolvedValue(recipe);
 
       const result = await service.create(7, makeCreateDto());
 
       expect(categoriesService.findById).toHaveBeenCalledWith(1);
-      expect(repository.create).toHaveBeenCalledWith(
+      expect(recipeModel.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          idUsuarios: 7,
-          idCategorias: 1,
-          nome: 'Bolo de cenoura',
+          userId: 7,
+          categoryId: 1,
+          name: 'Bolo de cenoura',
         }),
       );
-      expect(repository.findOne).toHaveBeenCalledWith({
-        where: { id: 10, idUsuarios: 7 },
-        relations: { categoria: true },
+      expect(recipeModel.findOne).toHaveBeenCalledWith({
+        where: { id: 10, userId: 7 },
+        include: [CATEGORY_INCLUDE],
       });
       expect(result.id).toBe(10);
-      expect(result.categoria?.nome).toBe('Bolos e tortas doces');
+      expect(result.category?.name).toBe('Bolos e tortas doces');
     });
 
-    it('rejeita categoria inexistente antes de salvar', async () => {
+    it('rejects a nonexistent category before saving', async () => {
       categoriesService.findById.mockResolvedValue(null);
 
-      await expect(service.create(7, makeCreateDto({ categoriaId: 999 }))).rejects.toBeInstanceOf(
+      await expect(service.create(7, makeCreateDto({ categoryId: 999 }))).rejects.toBeInstanceOf(
         BadRequestException,
       );
-      expect(repository.save).not.toHaveBeenCalled();
+      expect(recipeModel.create).not.toHaveBeenCalled();
     });
   });
 
-  describe('autorização por proprietário', () => {
-    it('não encontra receita de outro usuário e usa o id do dono na query', async () => {
-      repository.findOne.mockResolvedValue(null);
+  describe('listing', () => {
+    it('applies search, filtering, sorting and pagination in the database', async () => {
+      recipeModel.findAndCountAll.mockResolvedValue({ rows: [makeRecipe()], count: 1 });
+
+      const result = await service.findAll(7, {
+        page: 2,
+        limit: 5,
+        search: 'bolo',
+        categoryId: 1,
+        sortBy: 'name',
+        order: 'asc',
+      });
+
+      expect(recipeModel.findAndCountAll).toHaveBeenCalledWith(
+        expect.objectContaining({
+          limit: 5,
+          offset: 5,
+          distinct: true,
+          order: [
+            ['name', 'ASC'],
+            ['id', 'ASC'],
+          ],
+          include: [CATEGORY_INCLUDE],
+        }),
+      );
+      expect(result.meta).toEqual({ page: 2, limit: 5, total: 1, totalPages: 1 });
+      expect(result.data[0].id).toBe(10);
+    });
+  });
+
+  describe('owner authorization', () => {
+    it("does not find another user's recipe and uses the owner id in the query", async () => {
+      recipeModel.findOne.mockResolvedValue(null);
 
       await expect(service.findOne(8, 10)).rejects.toBeInstanceOf(NotFoundException);
-      expect(repository.findOne).toHaveBeenCalledWith({
-        where: { id: 10, idUsuarios: 8 },
-        relations: { categoria: true },
+      expect(recipeModel.findOne).toHaveBeenCalledWith({
+        where: { id: 10, userId: 8 },
+        include: [CATEGORY_INCLUDE],
       });
     });
 
-    it('bloqueia edição de receita de outro usuário', async () => {
-      repository.findOne.mockResolvedValue(null);
+    it("blocks editing another user's recipe", async () => {
+      recipeModel.findOne.mockResolvedValue(null);
 
-      await expect(service.update(8, 10, { nome: 'Alteração indevida' })).rejects.toBeInstanceOf(
+      await expect(service.update(8, 10, { name: 'Alteração indevida' })).rejects.toBeInstanceOf(
         NotFoundException,
       );
-      expect(repository.save).not.toHaveBeenCalled();
     });
 
-    it('bloqueia exclusão de receita de outro usuário', async () => {
-      repository.findOne.mockResolvedValue(null);
+    it("blocks deleting another user's recipe", async () => {
+      recipeModel.findOne.mockResolvedValue(null);
 
       await expect(service.remove(8, 10)).rejects.toBeInstanceOf(NotFoundException);
-      expect(repository.remove).not.toHaveBeenCalled();
     });
   });
 
   describe('update', () => {
-    it('rejeita corpo sem nenhum campo', async () => {
+    it('rejects a body with no fields', async () => {
       await expect(service.update(7, 10, {})).rejects.toBeInstanceOf(BadRequestException);
-      expect(repository.findOne).not.toHaveBeenCalled();
+      expect(recipeModel.findOne).not.toHaveBeenCalled();
     });
 
-    it('atualiza apenas a receita do usuário autenticado', async () => {
+    it("updates only the authenticated user's recipe", async () => {
       const recipe = makeRecipe();
-      repository.findOne.mockResolvedValue(recipe);
-      repository.save.mockImplementation((value: Recipe) => Promise.resolve(value));
+      recipeModel.findOne.mockResolvedValue(recipe);
 
-      const result = await service.update(7, 10, { nome: 'Novo nome', porcoes: 10 });
+      const result = await service.update(7, 10, { name: 'Novo nome', servings: 10 });
 
-      expect(recipe.nome).toBe('Novo nome');
-      expect(recipe.porcoes).toBe(10);
-      expect(repository.save).toHaveBeenCalledWith(recipe);
-      expect(result.nome).toBe('Novo nome');
-      expect(repository.findOne).toHaveBeenCalledWith({
-        where: { id: 10, idUsuarios: 7 },
-        relations: { categoria: true },
+      expect(recipe.name).toBe('Novo nome');
+      expect(recipe.servings).toBe(10);
+      expect(recipe.save.mock.calls).toHaveLength(1);
+      expect(result.name).toBe('Novo nome');
+      expect(recipeModel.findOne).toHaveBeenCalledWith({
+        where: { id: 10, userId: 7 },
+        include: [CATEGORY_INCLUDE],
       });
     });
 
-    it('valida a nova categoria ao editar', async () => {
-      repository.findOne.mockResolvedValue(makeRecipe());
+    it('validates the new category when editing', async () => {
+      const recipe = makeRecipe();
+      recipeModel.findOne.mockResolvedValue(recipe);
       categoriesService.findById.mockResolvedValue(null);
 
-      await expect(service.update(7, 10, { categoriaId: 999 })).rejects.toBeInstanceOf(
+      await expect(service.update(7, 10, { categoryId: 999 })).rejects.toBeInstanceOf(
         BadRequestException,
       );
-      expect(repository.save).not.toHaveBeenCalled();
+      expect(recipe.save.mock.calls).toHaveLength(0);
     });
   });
 
   describe('remove', () => {
-    it('remove a receita encontrada para o usuário', async () => {
+    it('removes the found recipe for the user', async () => {
       const recipe = makeRecipe();
-      repository.findOne.mockResolvedValue(recipe);
-      repository.remove.mockResolvedValue(recipe);
+      recipeModel.findOne.mockResolvedValue(recipe);
 
       await service.remove(7, 10);
 
-      expect(repository.remove).toHaveBeenCalledWith(recipe);
+      expect(recipe.destroy.mock.calls).toHaveLength(1);
+    });
+  });
+
+  describe('stats', () => {
+    it('converts database aggregates to numbers', async () => {
+      recipeModel.findOne.mockResolvedValue({
+        totalRecipes: '3',
+        categoriesUsed: '2',
+        lastUpdatedAt: '2026-01-01 10:00:00',
+      });
+
+      const stats = await service.stats(7);
+
+      expect(stats.totalRecipes).toBe(3);
+      expect(stats.categoriesUsed).toBe(2);
+      expect(stats.lastUpdatedAt).toEqual(new Date('2026-01-01 10:00:00'));
     });
   });
 });

@@ -1,6 +1,10 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+
+import { getAllowedOrigins } from './config/app-origins';
 
 /**
  * Configuração compartilhada entre o bootstrap real e os testes de integração,
@@ -8,6 +12,16 @@ import helmet from 'helmet';
  */
 export function configureApp(app: INestApplication): void {
   app.setGlobalPrefix('api');
+
+  const configService = app.get(ConfigService);
+  const httpApp = app as NestExpressApplication;
+
+  if (configService.get<boolean>('TRUST_PROXY', false)) {
+    // Apenas o proxy imediato é confiável; evita aceitar X-Forwarded-For forjado.
+    httpApp.set('trust proxy', Number(configService.get<string>('TRUST_PROXY_HOPS', '1')));
+  }
+
+  app.use(cookieParser());
 
   app.use(
     helmet({
@@ -17,16 +31,11 @@ export function configureApp(app: INestApplication): void {
     }),
   );
 
-  const configService = app.get(ConfigService);
-  const configuredOrigins = configService
-    .get<string>('CORS_ORIGIN', 'http://localhost:5173')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-
   app.enableCors({
-    origin: configuredOrigins.includes('*') ? true : configuredOrigins,
+    origin: getAllowedOrigins(configService),
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'X-CSRF-Token'],
+    credentials: true,
   });
 
   app.useGlobalPipes(

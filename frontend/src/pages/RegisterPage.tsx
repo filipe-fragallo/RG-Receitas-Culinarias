@@ -11,7 +11,7 @@ import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { getErrorDetails, getErrorMessage } from '../lib/errors';
 import { hasErrors, validateRegisterForm, type FormErrors } from '../lib/validation';
 
-type RegisterField = 'nome' | 'login' | 'senha' | 'confirmarSenha';
+type RegisterField = 'name' | 'login' | 'password' | 'confirmPassword';
 
 export function RegisterPage() {
   useDocumentTitle('Criar conta');
@@ -19,10 +19,10 @@ export function RegisterPage() {
   const navigate = useNavigate();
 
   const [values, setValues] = useState({
-    nome: '',
+    name: '',
     login: '',
-    senha: '',
-    confirmarSenha: '',
+    password: '',
+    confirmPassword: '',
   });
   const [errors, setErrors] = useState<FormErrors<RegisterField>>({});
   const [serverError, setServerError] = useState<string | null>(null);
@@ -38,6 +38,7 @@ export function RegisterPage() {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isSubmitting) return;
     setServerError(null);
     setServerDetails([]);
 
@@ -52,10 +53,10 @@ export function RegisterPage() {
 
     try {
       await register({
-        nome: values.nome.trim(),
+        name: values.name.trim(),
         login: values.login.trim().toLowerCase(),
-        senha: values.senha,
-        confirmarSenha: values.confirmarSenha,
+        password: values.password,
+        confirmPassword: values.confirmPassword,
       });
       navigate('/', { replace: true });
     } catch (error) {
@@ -105,11 +106,11 @@ export function RegisterPage() {
         )}
 
         <TextField
-          id="nome"
+          id="name"
           label="Nome"
-          value={values.nome}
-          onChange={(event) => handleChange('nome', event.target.value)}
-          error={errors.nome}
+          value={values.name}
+          onChange={(event) => handleChange('name', event.target.value)}
+          error={errors.name}
           autoComplete="name"
           placeholder="Como você quer ser chamado?"
           maxLength={100}
@@ -132,11 +133,11 @@ export function RegisterPage() {
         />
 
         <PasswordField
-          id="senha"
+          id="password"
           label="Senha"
-          value={values.senha}
-          onChange={(event) => handleChange('senha', event.target.value)}
-          error={errors.senha}
+          value={values.password}
+          onChange={(event) => handleChange('password', event.target.value)}
+          error={errors.password}
           hint="Use pelo menos 8 caracteres."
           autoComplete="new-password"
           placeholder="Crie uma senha"
@@ -145,11 +146,11 @@ export function RegisterPage() {
         />
 
         <PasswordField
-          id="confirmarSenha"
+          id="confirmPassword"
           label="Confirmar senha"
-          value={values.confirmarSenha}
-          onChange={(event) => handleChange('confirmarSenha', event.target.value)}
-          error={errors.confirmarSenha}
+          value={values.confirmPassword}
+          onChange={(event) => handleChange('confirmPassword', event.target.value)}
+          error={errors.confirmPassword}
           autoComplete="new-password"
           placeholder="Repita a senha"
           maxLength={72}

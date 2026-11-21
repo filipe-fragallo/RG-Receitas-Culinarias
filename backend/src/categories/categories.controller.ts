@@ -1,6 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import {
-  ApiBearerAuth,
+  ApiCookieAuth,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -10,8 +10,8 @@ import {
 import { CategoriesService } from './categories.service';
 import { CategoryResponseDto } from './dto/category-response.dto';
 
-@ApiTags('Categorias')
-@ApiBearerAuth('access-token')
+@ApiTags('Categories')
+@ApiCookieAuth('auth-cookie')
 @Controller('categories')
 export class CategoriesController {
   constructor(private readonly categoriesService: CategoriesService) {}
@@ -22,7 +22,9 @@ export class CategoriesController {
     description: 'Retorna as 13 categorias carregadas pelo script SQL do desafio.',
   })
   @ApiOkResponse({ description: 'Categorias em ordem alfabética.', type: [CategoryResponseDto] })
-  @ApiUnauthorizedResponse({ description: 'Token ausente, inválido ou expirado.' })
+  @ApiUnauthorizedResponse({
+    description: 'Sessão ausente, revogada, inválida ou expirada.',
+  })
   findAll(): Promise<CategoryResponseDto[]> {
     return this.categoriesService.findAll();
   }

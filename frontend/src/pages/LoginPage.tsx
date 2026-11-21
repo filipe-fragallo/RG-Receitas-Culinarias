@@ -20,15 +20,17 @@ export function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const redirectTo = (location.state as LocationState | null)?.from ?? '/';
+  const from = (location.state as LocationState | null)?.from;
+  const redirectTo =
+    typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') ? from : '/';
 
-  const [values, setValues] = useState({ login: '', senha: '' });
-  const [errors, setErrors] = useState<FormErrors<'login' | 'senha'>>({});
+  const [values, setValues] = useState({ login: '', password: '' });
+  const [errors, setErrors] = useState<FormErrors<'login' | 'password'>>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [serverDetails, setServerDetails] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleChange = (field: 'login' | 'senha', value: string) => {
+  const handleChange = (field: 'login' | 'password', value: string) => {
     setValues((current) => ({ ...current, [field]: value }));
     setErrors((current) => ({ ...current, [field]: undefined }));
     setServerError(null);
@@ -37,6 +39,7 @@ export function LoginPage() {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isSubmitting) return;
     setServerError(null);
     setServerDetails([]);
 
@@ -52,15 +55,15 @@ export function LoginPage() {
     try {
       await login({
         login: values.login.trim(),
-        senha: values.senha,
+        password: values.password,
       });
-      navigate(redirectTo.startsWith('/') ? redirectTo : '/', { replace: true });
+      navigate(redirectTo, { replace: true });
     } catch (error) {
       setServerError(getErrorMessage(error));
       setServerDetails(getErrorDetails(error));
 
       if (error instanceof ApiError && error.status === 401) {
-        setErrors({ senha: 'Verifique seu login e sua senha.' });
+        setErrors({ password: 'Verifique seu login e sua senha.' });
       }
     } finally {
       setIsSubmitting(false);
@@ -76,7 +79,7 @@ export function LoginPage() {
         <p>
           Ainda não tem um caderno?{' '}
           <Link
-            to="/cadastro"
+            to="/register"
             className="font-semibold text-olive-800 underline decoration-olive-300 decoration-2 underline-offset-4 transition hover:text-olive-950"
           >
             Criar minha conta
@@ -115,11 +118,11 @@ export function LoginPage() {
         />
 
         <PasswordField
-          id="senha"
+          id="password"
           label="Senha"
-          value={values.senha}
-          onChange={(event) => handleChange('senha', event.target.value)}
-          error={errors.senha}
+          value={values.password}
+          onChange={(event) => handleChange('password', event.target.value)}
+          error={errors.password}
           autoComplete="current-password"
           placeholder="Sua senha"
           required

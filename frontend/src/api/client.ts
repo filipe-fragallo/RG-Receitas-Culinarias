@@ -1,7 +1,9 @@
 import type { ApiErrorBody } from '../types/api';
 
-const API_BASE_URL = (import.meta.env.VITE_API_URL ?? '/api').replace(/\/$/, '');
-const TOKEN_STORAGE_KEY = 'meu-caderno:token';
+const configuredBaseUrl = (import.meta.env.VITE_API_URL ?? '').trim();
+const API_BASE_URL = (configuredBaseUrl || '/api').replace(/\/$/, '');
+const LEGACY_TOKEN_KEY = 'meu-caderno:token';
+const CSRF_PATH = '/auth/csrf';
 
 export const SESSION_EXPIRED_EVENT = 'meu-caderno:session-expired';
 
@@ -18,57 +20,100 @@ export class ApiError extends Error {
 }
 
 let sessionExpiredNotified = false;
+let csrfToken: string | null = null;
 
-export function getStoredToken(): string | null {
-  return window.localStorage.getItem(TOKEN_STORAGE_KEY);
+/** Remove apenas a chave antiga de autenticação, preservando outros dados. */
+export function removeLegacyToken(): boolean {
+  const existed = window.localStorage.getItem(LEGACY_TOKEN_KEY) !== null;
+  if (existed) window.localStorage.removeItem(LEGACY_TOKEN_KEY);
+  return existed;
 }
 
-export function setStoredToken(token: string): void {
-  sessionExpiredNotified = false;
-  window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+export function setCsrfToken(token: string | null): void {
+  csrfToken = token;
+  if (token) sessionExpiredNotified = false;
 }
 
-export function clearStoredToken(): void {
-  window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+export function clearCsrfToken(): void {
+  csrfToken = null;
+}
+
+export function getCsrfToken(): string | null {
+  return csrfToken;
 }
 
 function notifySessionExpired(): void {
-  if (sessionExpiredNotified) {
-    return;
-  }
-
+  if (sessionExpiredNotified) return;
   sessionExpiredNotified = true;
   window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
 }
 
 function isApiErrorBody(value: unknown): value is ApiErrorBody {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
+  if (typeof value !== 'object' || value === null) return false;
 
   const candidate = value as Record<string, unknown>;
-  return typeof candidate.message === 'string';
+
+  if (typeof candidate.message !== 'string') return false;
+  if (candidate.errors === undefined || candidate.errors === null) return true;
+
+  return (
+    Array.isArray(candidate.errors) &&
+    candidate.errors.every((detail) => typeof detail === 'string')
+  );
+}
+
+async function ensureCsrfToken(): Promise<string> {
+  if (csrfToken) return csrfToken;
+
+  let response: Response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}${CSRF_PATH}`, {
+      method: 'GET',
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+  } catch {
+    throw new ApiError(
+      0,
+      'Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.',
+    );
+  }
+
+  if (!response.ok) {
+    throw new ApiError(response.status, 'Não foi possível iniciar a proteção da sessão.');
+  }
+
+  const payload = (await response.json()) as { csrfToken?: unknown };
+
+  if (typeof payload.csrfToken !== 'string' || payload.csrfToken.length < 32) {
+    throw new ApiError(500, 'Resposta inválida do servidor ao iniciar a proteção da sessão.');
+  }
+
+  setCsrfToken(payload.csrfToken);
+  return payload.csrfToken;
 }
 
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
   signal?: AbortSignal;
+  /** Controla apenas o aviso global de 401; credenciais são sempre enviadas. */
   auth?: boolean;
+  /** Desativa o aviso global de sessão expirada (ex.: restauração silenciosa). */
+  notifyExpiry?: boolean;
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, signal, auth = true } = options;
+  const { method = 'GET', body, signal, auth = true, notifyExpiry = true } = options;
   const headers: Record<string, string> = { Accept: 'application/json' };
 
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
   }
 
-  const token = getStoredToken();
-
-  if (auth && token) {
-    headers.Authorization = `Bearer ${token}`;
+  if (method !== 'GET') {
+    headers['X-CSRF-Token'] = await ensureCsrfToken();
   }
 
   let response: Response;
@@ -78,12 +123,11 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       method,
       headers,
       signal,
+      credentials: 'include',
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw error;
-    }
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
 
     throw new ApiError(
       0,
@@ -91,9 +135,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     );
   }
 
-  if (response.status === 204) {
-    return undefined as T;
-  }
+  if (response.status === 204) return undefined as T;
 
   const rawText = await response.text();
   let payload: unknown = null;
@@ -115,9 +157,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       : 'Ocorreu um erro ao processar sua solicitação.';
     const errors = isApiErrorBody(payload) && payload.errors ? payload.errors : [];
 
-    if (response.status === 401 && auth) {
-      notifySessionExpired();
-    }
+    if (response.status === 401 && auth && notifyExpiry) notifySessionExpired();
 
     throw new ApiError(response.status, message, errors);
   }

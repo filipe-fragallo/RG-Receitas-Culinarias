@@ -1,17 +1,17 @@
 export interface RecipeFormValues {
-  nome: string;
-  categoriaId: string;
-  tempoPreparoMinutos: string;
-  porcoes: string;
-  ingredientes: string;
-  modoPreparo: string;
+  name: string;
+  categoryId: string;
+  preparationTimeMinutes: string;
+  servings: string;
+  ingredients: string;
+  instructions: string;
 }
 
 export const EMPTY_RECIPE_FORM: RecipeFormValues = {
-  nome: '',
-  categoriaId: '',
-  tempoPreparoMinutos: '',
-  porcoes: '',
-  ingredientes: '',
-  modoPreparo: '',
+  name: '',
+  categoryId: '',
+  preparationTimeMinutes: '',
+  servings: '',
+  ingredients: '',
+  instructions: '',
 };

@@ -12,7 +12,7 @@ export class RegisterDto {
   @Transform(trim)
   @IsString({ message: 'O nome é obrigatório.' })
   @Length(3, 100, { message: 'O nome deve ter entre 3 e 100 caracteres.' })
-  nome!: string;
+  name!: string;
 
   @ApiProperty({ example: 'maria.silva', minLength: 3, maxLength: 100 })
   @Transform(({ value }: { value: unknown }) =>
@@ -29,10 +29,10 @@ export class RegisterDto {
   @IsString({ message: 'A senha é obrigatória.' })
   @MinLength(8, { message: 'A senha deve ter no mínimo 8 caracteres.' })
   @MaxLength(72, { message: 'A senha deve ter no máximo 72 caracteres.' })
-  senha!: string;
+  password!: string;
 
   @ApiProperty({ example: 'Senha@123', minLength: 8, maxLength: 72 })
   @IsString({ message: 'A confirmação de senha é obrigatória.' })
-  @Match('senha', { message: 'As senhas não conferem.' })
-  confirmarSenha!: string;
+  @Match('password', { message: 'As senhas não conferem.' })
+  confirmPassword!: string;
 }

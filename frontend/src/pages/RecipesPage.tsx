@@ -36,7 +36,7 @@ function parseCategoryId(value: string | null): number | null {
 }
 
 function parseSort(value: string | null): RecipeSortField {
-  return value === 'nome' || value === 'alteradoEm' ? value : 'criadoEm';
+  return value === 'name' || value === 'updatedAt' ? value : 'createdAt';
 }
 
 function currentGreeting(): string {
@@ -53,15 +53,16 @@ export function RecipesPage() {
   const toast = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const page = parsePage(searchParams.get('pagina'));
-  const search = searchParams.get('busca')?.trim() ?? '';
-  const categoriaId = parseCategoryId(searchParams.get('categoria'));
-  const sortBy = parseSort(searchParams.get('ordenar'));
-  const order: SortOrder = searchParams.get('direcao') === 'asc' ? 'asc' : 'desc';
+  const page = parsePage(searchParams.get('page'));
+  const search = searchParams.get('search')?.trim() ?? '';
+  const categoryId = parseCategoryId(searchParams.get('category'));
+  const sortBy = parseSort(searchParams.get('sortBy'));
+  const order: SortOrder = searchParams.get('order') === 'asc' ? 'asc' : 'desc';
 
   const [searchInput, setSearchInput] = useState(search);
   const [categories, setCategories] = useState<Category[]>([]);
   const [recipes, setRecipes] = useState<PaginatedRecipes | null>(null);
+  const [loadedRequestKey, setLoadedRequestKey] = useState<string | null>(null);
   const [stats, setStats] = useState<RecipeStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isStatsLoading, setIsStatsLoading] = useState(true);
@@ -69,7 +70,8 @@ export function RecipesPage() {
   const [reloadKey, setReloadKey] = useState(0);
 
   const debouncedSearch = useDebouncedValue(searchInput, 350);
-  const hasFilters = Boolean(search || categoriaId);
+  const hasFilters = Boolean(searchInput.trim() || categoryId);
+  const currentRequestKey = `${page}|${search}|${categoryId ?? ''}|${sortBy}|${order}|${reloadKey}`;
 
   const updateParams = useCallback(
     (changes: Record<string, string | null>, options?: { replace?: boolean }) => {
@@ -110,7 +112,7 @@ export function RecipesPage() {
       return;
     }
 
-    updateParams({ busca: normalized || null, pagina: null }, { replace: true });
+    updateParams({ search: normalized || null, page: null }, { replace: true });
   }, [debouncedSearch, searchInput, search, updateParams]);
 
   useEffect(() => {
@@ -118,9 +120,11 @@ export function RecipesPage() {
 
     categoriesApi
       .list(controller.signal)
-      .then(setCategories)
+      .then((items) => {
+        if (!controller.signal.aborted) setCategories(items);
+      })
       .catch((requestError: unknown) => {
-        if (isAbortError(requestError)) return;
+        if (controller.signal.aborted || isAbortError(requestError)) return;
         toast.error('Não foi possível carregar as categorias.');
       });
 
@@ -138,15 +142,19 @@ export function RecipesPage() {
           page,
           limit: PAGE_SIZE,
           search: search || undefined,
-          categoriaId: categoriaId ?? undefined,
+          categoryId: categoryId ?? undefined,
           sortBy,
           order,
         },
         controller.signal,
       )
-      .then(setRecipes)
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        setRecipes(result);
+        setLoadedRequestKey(currentRequestKey);
+      })
       .catch((requestError: unknown) => {
-        if (isAbortError(requestError)) return;
+        if (controller.signal.aborted || isAbortError(requestError)) return;
         setError(getErrorMessage(requestError));
       })
       .finally(() => {
@@ -156,7 +164,7 @@ export function RecipesPage() {
       });
 
     return () => controller.abort();
-  }, [page, search, categoriaId, sortBy, order, reloadKey]);
+  }, [page, search, categoryId, sortBy, order, reloadKey, currentRequestKey]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -164,9 +172,11 @@ export function RecipesPage() {
 
     recipesApi
       .stats(controller.signal)
-      .then(setStats)
+      .then((result) => {
+        if (!controller.signal.aborted) setStats(result);
+      })
       .catch((requestError: unknown) => {
-        if (isAbortError(requestError)) return;
+        if (controller.signal.aborted || isAbortError(requestError)) return;
         setStats(null);
       })
       .finally(() => {
@@ -182,28 +192,28 @@ export function RecipesPage() {
   // manual ou histórico do navegador). Sem isso, a tela mostraria "caderno em
   // branco" mesmo havendo receitas em uma página anterior.
   useEffect(() => {
-    if (isLoading || error || !recipes) return;
+    if (isLoading || error || !recipes || loadedRequestKey !== currentRequestKey) return;
 
     const lastPage = Math.max(recipes.meta.totalPages, 1);
 
     if (page > lastPage) {
-      updateParams({ pagina: lastPage > 1 ? String(lastPage) : null }, { replace: true });
+      updateParams({ page: lastPage > 1 ? String(lastPage) : null }, { replace: true });
     }
-  }, [isLoading, error, recipes, page, updateParams]);
+  }, [isLoading, error, recipes, loadedRequestKey, currentRequestKey, page, updateParams]);
 
   const reload = () => setReloadKey((current) => current + 1);
 
   const handlePageChange = (nextPage: number) => {
-    updateParams({ pagina: nextPage > 1 ? String(nextPage) : null });
+    updateParams({ page: nextPage > 1 ? String(nextPage) : null });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const clearFilters = () => {
     setSearchInput('');
-    updateParams({ busca: null, categoria: null, pagina: null });
+    updateParams({ search: null, category: null, page: null });
   };
 
-  const firstName = getFirstName(user?.nome ?? user?.login);
+  const firstName = getFirstName(user?.name ?? user?.login);
   const total = recipes?.meta.total ?? 0;
 
   return (
@@ -223,7 +233,7 @@ export function RecipesPage() {
         </div>
 
         <Link
-          to="/receitas/nova"
+          to="/recipes/new"
           className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-olive-800 px-5 py-3.5 text-sm font-semibold text-cream-50 shadow-sm transition hover:bg-olive-900 focus-visible:ring-2 focus-visible:ring-olive-500 focus-visible:ring-offset-2 sm:w-auto"
         >
           <Plus size={19} aria-hidden />
@@ -237,17 +247,17 @@ export function RecipesPage() {
         search={searchInput}
         onSearchChange={setSearchInput}
         categories={categories}
-        categoriaId={categoriaId}
+        categoryId={categoryId}
         onCategoryChange={(value) =>
-          updateParams({ categoria: value ? String(value) : null, pagina: null })
+          updateParams({ category: value ? String(value) : null, page: null })
         }
         sortBy={sortBy}
         order={order}
         onSortChange={(nextSortBy, nextOrder) =>
           updateParams({
-            ordenar: nextSortBy === 'criadoEm' ? null : nextSortBy,
-            direcao: nextOrder === 'desc' ? null : nextOrder,
-            pagina: null,
+            sortBy: nextSortBy === 'createdAt' ? null : nextSortBy,
+            order: nextOrder === 'desc' ? null : nextOrder,
+            page: null,
           })
         }
         onClear={clearFilters}
@@ -263,9 +273,9 @@ export function RecipesPage() {
             <span className="text-ink-muted/80"> com os filtros atuais</span>
           )}
         </p>
-        {search && !isLoading && (
+        {searchInput.trim() && !isLoading && (
           <p className="text-xs text-ink-muted">
-            Pesquisa por <span className="font-semibold text-ink">“{search}”</span>
+            Pesquisa por <span className="font-semibold text-ink">“{searchInput.trim()}”</span>
           </p>
         )}
       </div>
@@ -319,7 +329,7 @@ export function RecipesPage() {
             description="Comece registrando a primeira receita. Pode ser aquele prato simples que sempre dá certo — ou a receita de família que ninguém quer perder."
             action={
               <Link
-                to="/receitas/nova"
+                to="/recipes/new"
                 className="inline-flex items-center gap-2 rounded-xl bg-olive-800 px-5 py-3 text-sm font-semibold text-cream-50 shadow-sm transition hover:bg-olive-900 focus-visible:ring-2 focus-visible:ring-olive-500 focus-visible:ring-offset-2"
               >
                 <Plus size={18} aria-hidden />

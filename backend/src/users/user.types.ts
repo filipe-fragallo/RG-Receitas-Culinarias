@@ -1,6 +1,6 @@
 export interface PublicUser {
   id: number;
-  nome: string | null;
+  name: string | null;
   login: string;
-  criadoEm: Date;
+  createdAt: Date;
 }

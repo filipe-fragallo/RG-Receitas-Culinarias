@@ -16,5 +16,5 @@ export class LoginDto {
   @IsString({ message: 'A senha é obrigatória.' })
   @MinLength(1, { message: 'A senha é obrigatória.' })
   @MaxLength(72, { message: 'A senha deve ter no máximo 72 caracteres.' })
-  senha!: string;
+  password!: string;
 }

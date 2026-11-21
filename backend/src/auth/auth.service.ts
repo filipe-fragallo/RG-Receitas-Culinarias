@@ -2,16 +2,29 @@ import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/co
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
-import { QueryFailedError } from 'typeorm';
+import { randomBytes } from 'node:crypto';
+import { DatabaseError, UniqueConstraintError } from 'sequelize';
 
-import { JwtPayload } from '../common/interfaces/authenticated-user.interface';
+import {
+  AuthenticatedSession,
+  JwtPayload,
+} from '../common/interfaces/authenticated-user.interface';
 import { PublicUser } from '../users/user.types';
 import { UsersService } from '../users/users.service';
-import { AuthResponseDto } from './dto/auth-response.dto';
+import { AuthSessionsService, hashSessionIdentifier } from './auth-sessions.service';
+import { deriveCsrfToken } from './auth-cookies';
+import { MeResponseDto } from './dto/me-response.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 
 const BCRYPT_ROUNDS = 10;
+
+export interface IssuedAuth {
+  token: string;
+  csrfToken: string;
+  expiresIn: number;
+  user: PublicUser;
+}
 
 @Injectable()
 export class AuthService {
@@ -25,27 +38,28 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly sessionsService: AuthSessionsService,
   ) {}
 
-  async register(dto: RegisterDto): Promise<AuthResponseDto> {
+  async register(dto: RegisterDto): Promise<IssuedAuth> {
     const login = dto.login.trim().toLowerCase();
-    const nome = dto.nome.trim();
+    const name = dto.name.trim();
     const existingUser = await this.usersService.findByLogin(login);
 
     if (existingUser) {
       throw new ConflictException('Este login já está em uso.');
     }
 
-    const passwordHash = await bcrypt.hash(dto.senha, BCRYPT_ROUNDS);
+    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
 
     try {
       const user = await this.usersService.create({
-        nome,
+        name,
         login,
-        senha: passwordHash,
+        passwordHash,
       });
 
-      return this.buildAuthResponse(this.usersService.toPublic(user));
+      return this.issueSession(this.usersService.toPublic(user));
     } catch (error) {
       // Duas requisições simultâneas podem passar pela checagem acima;
       // o índice único do banco é a garantia final.
@@ -57,59 +71,122 @@ export class AuthService {
     }
   }
 
-  async login(dto: LoginDto): Promise<AuthResponseDto> {
+  async login(dto: LoginDto): Promise<IssuedAuth> {
     const user = await this.usersService.findByLogin(dto.login.trim().toLowerCase(), true);
-    const passwordMatches = await bcrypt.compare(dto.senha, user?.senha ?? this.dummyPasswordHash);
+    const passwordMatches = await bcrypt.compare(
+      dto.password,
+      user?.passwordHash ?? this.dummyPasswordHash,
+    );
 
     if (!user || !passwordMatches) {
       throw new UnauthorizedException('Login ou senha inválidos.');
     }
 
-    return this.buildAuthResponse(this.usersService.toPublic(user));
+    return this.issueSession(this.usersService.toPublic(user));
   }
 
-  async me(userId: number): Promise<PublicUser> {
-    const user = await this.usersService.findById(userId);
+  async me(session: AuthenticatedSession): Promise<MeResponseDto> {
+    const user = await this.usersService.findById(session.id);
 
     if (!user) {
       throw new UnauthorizedException('Sessão inválida. Entre novamente.');
     }
 
-    return this.usersService.toPublic(user);
-  }
-
-  logout(): { message: string } {
     return {
-      message:
-        'Logout realizado no cliente. O token JWT deixa de ser utilizado e expira automaticamente.',
+      user: this.usersService.toPublic(user),
+      csrfToken: this.csrfTokenFor(session.jti),
     };
   }
 
-  private async buildAuthResponse(user: PublicUser): Promise<AuthResponseDto> {
+  createPreAuthCsrfToken(): string {
+    return randomBytes(32).toString('base64url');
+  }
+
+  csrfTokenFor(jti: string): string {
+    return deriveCsrfToken(this.configService.getOrThrow<string>('JWT_SECRET'), jti);
+  }
+
+  async logout(tokenIdentifierHash: string): Promise<{ message: string }> {
+    await this.sessionsService.revoke(tokenIdentifierHash);
+    return { message: 'Sessão encerrada com sucesso.' };
+  }
+
+  /** Valida assinatura, expiração, sessão persistida e existência do usuário. */
+  async validateToken(token: string): Promise<AuthenticatedSession> {
+    let payload: JwtPayload;
+
+    try {
+      payload = await this.jwtService.verifyAsync<JwtPayload>(token);
+    } catch {
+      throw new UnauthorizedException('Sessão expirada ou token inválido.');
+    }
+
+    if (
+      typeof payload.sub !== 'number' ||
+      typeof payload.login !== 'string' ||
+      typeof payload.jti !== 'string' ||
+      payload.jti.length === 0
+    ) {
+      throw new UnauthorizedException('Sessão inválida. Entre novamente.');
+    }
+
+    const tokenIdentifierHash = hashSessionIdentifier(payload.jti);
+    const session = await this.sessionsService.findValid(tokenIdentifierHash);
+
+    if (!session || session.userId !== payload.sub) {
+      throw new UnauthorizedException('Sessão inválida. Entre novamente.');
+    }
+
+    const user = await this.usersService.findById(payload.sub);
+
+    if (!user) {
+      throw new UnauthorizedException('Sessão inválida. Entre novamente.');
+    }
+
+    return {
+      id: user.id,
+      login: user.login,
+      name: user.name,
+      jti: payload.jti,
+      tokenIdentifierHash,
+      expiresAt: session.expiresAt,
+    };
+  }
+
+  private async issueSession(user: PublicUser): Promise<IssuedAuth> {
+    const expiresIn = Number(this.configService.get<string>('JWT_EXPIRES_IN_SECONDS') ?? 3600);
+    const jti = randomBytes(16).toString('hex');
+    const expiresAt = new Date(Date.now() + expiresIn * 1000);
+
+    await this.sessionsService.create(user.id, jti, expiresAt);
+
     const payload: JwtPayload = {
       sub: user.id,
       login: user.login,
-      nome: user.nome,
+      name: user.name,
+      jti,
     };
 
-    const expiresIn = Number(this.configService.get<string>('JWT_EXPIRES_IN_SECONDS') ?? 3600);
-
-    const accessToken = await this.jwtService.signAsync(payload, { expiresIn });
+    const token = await this.jwtService.signAsync(payload, { expiresIn });
 
     return {
-      accessToken,
-      tokenType: 'Bearer',
+      token,
+      csrfToken: this.csrfTokenFor(jti),
       expiresIn,
       user,
     };
   }
 
   private isDuplicateEntryError(error: unknown): boolean {
-    if (!(error instanceof QueryFailedError)) {
-      return false;
+    if (error instanceof UniqueConstraintError) {
+      return true;
     }
 
-    const driverError = error.driverError as { code?: string } | undefined;
-    return driverError?.code === 'ER_DUP_ENTRY';
+    if (error instanceof DatabaseError) {
+      const driverError = error.parent as { code?: string } | undefined;
+      return driverError?.code === 'ER_DUP_ENTRY';
+    }
+
+    return false;
   }
 }

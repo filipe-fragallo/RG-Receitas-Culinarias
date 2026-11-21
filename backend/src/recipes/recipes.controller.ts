@@ -14,10 +14,11 @@ import {
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
-  ApiBearerAuth,
+  ApiCookieAuth,
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
+  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
@@ -38,9 +39,17 @@ const recipeIdPipe = new ParseIntPipe({
   exceptionFactory: () => new BadRequestException('Identificador da receita inválido.'),
 });
 
-@ApiTags('Receitas')
-@ApiBearerAuth('access-token')
-@ApiUnauthorizedResponse({ description: 'Token ausente, inválido ou expirado.' })
+const CSRF_HEADER_DOC = {
+  name: 'X-CSRF-Token',
+  description: 'Token devolvido por /api/auth/csrf, /api/auth/me, /auth/login ou /auth/register.',
+  required: true,
+};
+
+@ApiTags('Recipes')
+@ApiCookieAuth('auth-cookie')
+@ApiUnauthorizedResponse({
+  description: 'Sessão ausente, revogada, inválida ou expirada.',
+})
 @Controller('recipes')
 export class RecipesController {
   constructor(private readonly recipesService: RecipesService) {}
@@ -84,9 +93,10 @@ export class RecipesController {
   @ApiOperation({
     summary: 'Cadastra uma receita',
     description:
-      'O proprietário é sempre o usuário do token. Campos como idUsuarios não fazem parte ' +
+      'O proprietário é sempre o usuário da sessão. Campos como userId não fazem parte ' +
       'do contrato e são rejeitados pela validação.',
   })
+  @ApiHeader(CSRF_HEADER_DOC)
   @ApiCreatedResponse({ description: 'Receita criada.', type: RecipeResponseDto })
   @ApiBadRequestResponse({ description: 'Dados inválidos ou categoria inexistente.' })
   create(
@@ -98,6 +108,7 @@ export class RecipesController {
 
   @Patch(':id')
   @ApiOperation({ summary: 'Atualiza uma receita do usuário autenticado' })
+  @ApiHeader(CSRF_HEADER_DOC)
   @ApiParam({ name: 'id', example: 1 })
   @ApiOkResponse({ description: 'Receita atualizada.', type: RecipeResponseDto })
   @ApiBadRequestResponse({ description: 'Dados inválidos ou nenhum campo informado.' })
@@ -113,6 +124,7 @@ export class RecipesController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Exclui uma receita do usuário autenticado' })
+  @ApiHeader(CSRF_HEADER_DOC)
   @ApiParam({ name: 'id', example: 1 })
   @ApiNoContentResponse({ description: 'Receita excluída.' })
   @ApiNotFoundResponse({ description: 'Receita inexistente ou pertencente a outro usuário.' })

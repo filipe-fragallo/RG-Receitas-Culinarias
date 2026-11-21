@@ -4,6 +4,10 @@ coverage
 .env
 .env.*
 !.env.example
+e2e
 playwright-report
 test-results
+vitest.config.ts
+playwright.config.ts
 *.log
+.DS_Store

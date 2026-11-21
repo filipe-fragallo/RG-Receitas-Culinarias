@@ -9,26 +9,26 @@ import { QueryRecipesDto } from '../recipes/dto/query-recipes.dto';
 const messagesOf = (errors: Awaited<ReturnType<typeof validate>>): string[] =>
   errors.flatMap((error) => Object.values(error.constraints ?? {}));
 
-describe('Validação dos DTOs', () => {
-  it('aceita um cadastro válido e normaliza o login', async () => {
+describe('DTO validation', () => {
+  it('accepts a valid registration and normalizes the login', async () => {
     const dto = plainToInstance(RegisterDto, {
-      nome: '  Maria Silva  ',
+      name: '  Maria Silva  ',
       login: '  MARIA.SILVA ',
-      senha: 'Senha@123',
-      confirmarSenha: 'Senha@123',
+      password: 'Senha@123',
+      confirmPassword: 'Senha@123',
     });
 
     expect(await validate(dto)).toHaveLength(0);
-    expect(dto.nome).toBe('Maria Silva');
+    expect(dto.name).toBe('Maria Silva');
     expect(dto.login).toBe('maria.silva');
   });
 
-  it('rejeita senhas diferentes e senha curta', async () => {
+  it('rejects mismatched and too-short passwords', async () => {
     const dto = plainToInstance(RegisterDto, {
-      nome: 'Maria Silva',
+      name: 'Maria Silva',
       login: 'maria.silva',
-      senha: '123',
-      confirmarSenha: '456',
+      password: '123',
+      confirmPassword: '456',
     });
 
     const messages = messagesOf(await validate(dto)).join(' ');
@@ -36,32 +36,32 @@ describe('Validação dos DTOs', () => {
     expect(messages).toContain('no mínimo 8 caracteres');
   });
 
-  it('rejeita login com caracteres não permitidos', async () => {
+  it('rejects a login with disallowed characters', async () => {
     const dto = plainToInstance(RegisterDto, {
-      nome: 'Maria Silva',
+      name: 'Maria Silva',
       login: 'maria silva!',
-      senha: 'Senha@123',
-      confirmarSenha: 'Senha@123',
+      password: 'Senha@123',
+      confirmPassword: 'Senha@123',
     });
 
     expect(messagesOf(await validate(dto)).join(' ')).toContain('apenas letras, números');
   });
 
-  it('exige login e senha no DTO de login', async () => {
-    const dto = plainToInstance(LoginDto, { login: '', senha: '' });
+  it('requires login and password in the login DTO', async () => {
+    const dto = plainToInstance(LoginDto, { login: '', password: '' });
     const messages = messagesOf(await validate(dto)).join(' ');
     expect(messages).toContain('login é obrigatório');
     expect(messages).toContain('senha é obrigatória');
   });
 
-  it('rejeita receita fora dos limites do banco', async () => {
+  it('rejects a recipe outside database limits', async () => {
     const dto = plainToInstance(CreateRecipeDto, {
-      nome: 'x'.repeat(46),
-      categoriaId: 0,
-      tempoPreparoMinutos: 0,
-      porcoes: 0,
-      ingredientes: '',
-      modoPreparo: '',
+      name: 'x'.repeat(46),
+      categoryId: 0,
+      preparationTimeMinutes: 0,
+      servings: 0,
+      ingredients: '',
+      instructions: '',
     });
 
     const messages = messagesOf(await validate(dto)).join(' ');
@@ -70,12 +70,12 @@ describe('Validação dos DTOs', () => {
     expect(messages).toContain('maior que zero');
   });
 
-  it('converte e valida os parâmetros de pesquisa', async () => {
+  it('converts and validates query parameters', async () => {
     const dto = plainToInstance(QueryRecipesDto, {
       page: '2',
       limit: '9',
-      categoriaId: '3',
-      sortBy: 'nome',
+      categoryId: '3',
+      sortBy: 'name',
       order: 'asc',
       search: '  bolo  ',
     });
@@ -83,13 +83,13 @@ describe('Validação dos DTOs', () => {
     expect(await validate(dto)).toHaveLength(0);
     expect(dto.page).toBe(2);
     expect(dto.limit).toBe(9);
-    expect(dto.categoriaId).toBe(3);
+    expect(dto.categoryId).toBe(3);
     expect(dto.search).toBe('bolo');
   });
 
-  it('rejeita ordenação não permitida', async () => {
+  it('rejects a disallowed sort field', async () => {
     const dto = plainToInstance(QueryRecipesDto, {
-      sortBy: 'senha',
+      sortBy: 'password',
       order: 'aleatoria',
     });
 

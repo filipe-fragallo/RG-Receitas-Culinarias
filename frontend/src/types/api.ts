@@ -1,15 +1,23 @@
 export interface User {
   id: number;
-  nome: string | null;
+  name: string | null;
   login: string;
-  criadoEm: string;
+  createdAt: string;
+}
+
+export interface CsrfResponse {
+  csrfToken: string;
 }
 
 export interface AuthResponse {
-  accessToken: string;
-  tokenType: string;
   expiresIn: number;
+  csrfToken: string;
   user: User;
+}
+
+export interface MeResponse {
+  user: User;
+  csrfToken: string;
 }
 
 export interface ApiErrorBody {
@@ -23,28 +31,28 @@ export interface ApiErrorBody {
 
 export interface Category {
   id: number;
-  nome: string | null;
+  name: string | null;
 }
 
 export interface Recipe {
   id: number;
-  nome: string | null;
-  categoria: Category | null;
-  tempoPreparoMinutos: number | null;
-  porcoes: number | null;
-  ingredientes: string | null;
-  modoPreparo: string;
-  criadoEm: string;
-  alteradoEm: string;
+  name: string | null;
+  category: Category | null;
+  preparationTimeMinutes: number | null;
+  servings: number | null;
+  ingredients: string | null;
+  instructions: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface RecipeInput {
-  nome: string;
-  categoriaId: number;
-  tempoPreparoMinutos: number;
-  porcoes: number;
-  ingredientes: string;
-  modoPreparo: string;
+  name: string;
+  categoryId: number;
+  preparationTimeMinutes: number;
+  servings: number;
+  ingredients: string;
+  instructions: string;
 }
 
 export interface PaginationMeta {
@@ -60,31 +68,31 @@ export interface PaginatedRecipes {
 }
 
 export interface RecipeStats {
-  totalReceitas: number;
-  categoriasUtilizadas: number;
-  atualizadaEm: string | null;
+  totalRecipes: number;
+  categoriesUsed: number;
+  lastUpdatedAt: string | null;
 }
 
-export type RecipeSortField = 'nome' | 'criadoEm' | 'alteradoEm';
+export type RecipeSortField = 'name' | 'createdAt' | 'updatedAt';
 export type SortOrder = 'asc' | 'desc';
 
 export interface RecipeQuery {
   page?: number;
   limit?: number;
   search?: string;
-  categoriaId?: number;
+  categoryId?: number;
   sortBy?: RecipeSortField;
   order?: SortOrder;
 }
 
 export interface RegisterInput {
-  nome: string;
+  name: string;
   login: string;
-  senha: string;
-  confirmarSenha: string;
+  password: string;
+  confirmPassword: string;
 }
 
 export interface LoginInput {
   login: string;
-  senha: string;
+  password: string;
 }

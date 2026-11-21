@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-import {
-  clearStoredToken,
-  getStoredToken,
-  SESSION_EXPIRED_EVENT,
-  setStoredToken,
-} from '../api/client';
+import { clearCsrfToken, removeLegacyToken, SESSION_EXPIRED_EVENT } from '../api/client';
 import { authApi } from '../api/services';
 import { useToast } from '../hooks/useToast';
 import type { LoginInput, RegisterInput, User } from '../types/api';
@@ -20,9 +15,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const toast = useToast();
   const isLoggingOut = useRef(false);
+  const isAuthRequestInFlight = useRef(false);
 
   const clearSession = useCallback(() => {
-    clearStoredToken();
+    removeLegacyToken();
+    clearCsrfToken();
     setUser(null);
     setStatus('anonymous');
   }, []);
@@ -31,12 +28,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let active = true;
 
     const restoreSession = async () => {
-      const token = getStoredToken();
-
-      if (!token) {
-        if (active) setStatus('anonymous');
-        return;
-      }
+      // Migração pontual: remove somente a chave antiga de autenticação.
+      const hadLegacyToken = removeLegacyToken();
 
       try {
         const currentUser = await authApi.me();
@@ -48,6 +41,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         if (!active) return;
         clearSession();
+        if (hadLegacyToken) {
+          toast.info('Sua sessão anterior foi encerrada. Entre novamente para continuar.');
+        }
       }
     };
 
@@ -56,13 +52,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, [clearSession]);
+  }, [clearSession, toast]);
 
   useEffect(() => {
     const handleSessionExpired = () => {
-      if (isLoggingOut.current) {
-        return;
-      }
+      // Respostas 401 de requisições antigas podem chegar após o logout.
+      if (isLoggingOut.current || status === 'anonymous') return;
 
       clearSession();
       toast.error('Sua sessão expirou. Entre novamente para continuar.');
@@ -73,43 +68,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       window.removeEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
     };
-  }, [clearSession, toast]);
+  }, [clearSession, status, toast]);
 
   const login = useCallback(
     async (input: LoginInput) => {
-      const response = await authApi.login(input);
-      setStoredToken(response.accessToken);
-      setUser(response.user);
-      setStatus('authenticated');
-      toast.success(
-        `Bem-vindo de volta${firstName(response.user.nome) ? `, ${firstName(response.user.nome)}` : ''}!`,
-      );
+      if (isAuthRequestInFlight.current) return;
+      isAuthRequestInFlight.current = true;
+
+      try {
+        const response = await authApi.login(input);
+        setUser(response.user);
+        setStatus('authenticated');
+        toast.success(
+          `Bem-vindo de volta${firstName(response.user.name) ? `, ${firstName(response.user.name)}` : ''}!`,
+        );
+      } finally {
+        isAuthRequestInFlight.current = false;
+      }
     },
     [toast],
   );
 
   const register = useCallback(
     async (input: RegisterInput) => {
-      const response = await authApi.register(input);
-      setStoredToken(response.accessToken);
-      setUser(response.user);
-      setStatus('authenticated');
-      toast.success('Conta criada com sucesso. Seu caderno está pronto!');
+      if (isAuthRequestInFlight.current) return;
+      isAuthRequestInFlight.current = true;
+
+      try {
+        const response = await authApi.register(input);
+        setUser(response.user);
+        setStatus('authenticated');
+        toast.success('Conta criada com sucesso. Seu caderno está pronto!');
+      } finally {
+        isAuthRequestInFlight.current = false;
+      }
     },
     [toast],
   );
 
   const logout = useCallback(async () => {
+    if (isLoggingOut.current) return;
     isLoggingOut.current = true;
 
     try {
       await authApi.logout();
-    } catch {
-      // Mesmo que o token já esteja expirado, a sessão local deve ser encerrada.
-    } finally {
+      // Só limpa o estado local depois que o servidor confirmou a revogação.
+      // O cookie HttpOnly permanece válido se a chamada falhar: fingir logout
+      // aqui faria a próxima recarga restaurar a sessão silenciosamente.
       clearSession();
-      isLoggingOut.current = false;
       toast.success('Você saiu da sua conta.');
+    } catch {
+      toast.error('Não foi possível encerrar a sessão no servidor. Tente novamente.');
+    } finally {
+      isLoggingOut.current = false;
     }
   }, [clearSession, toast]);
 

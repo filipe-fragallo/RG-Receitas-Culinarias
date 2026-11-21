@@ -1,13 +1,13 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { SequelizeModule } from '@nestjs/sequelize';
 
 import { CategoriesModule } from '../categories/categories.module';
-import { Recipe } from './recipe.entity';
+import { Recipe } from '../database/models/recipe.model';
 import { RecipesController } from './recipes.controller';
 import { RecipesService } from './recipes.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Recipe]), CategoriesModule],
+  imports: [SequelizeModule.forFeature([Recipe]), CategoriesModule],
   controllers: [RecipesController],
   providers: [RecipesService],
 })

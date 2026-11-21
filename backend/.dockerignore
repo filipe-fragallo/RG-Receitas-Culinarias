@@ -4,5 +4,7 @@ coverage
 .env
 .env.*
 !.env.example
-test-results
+test
+docker-compose.yml
 *.log
+.DS_Store

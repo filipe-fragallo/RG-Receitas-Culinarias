@@ -88,7 +88,7 @@ export function RecipeDetailPage() {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  useDocumentTitle(recipe?.nome ?? 'Receita');
+  useDocumentTitle(recipe?.name ?? 'Receita');
 
   useEffect(() => {
     if (!Number.isInteger(recipeId) || recipeId < 1) {
@@ -104,9 +104,11 @@ export function RecipeDetailPage() {
 
     recipesApi
       .get(recipeId, controller.signal)
-      .then(setRecipe)
+      .then((loaded) => {
+        if (!controller.signal.aborted) setRecipe(loaded);
+      })
       .catch((requestError: unknown) => {
-        if (isAbortError(requestError)) return;
+        if (controller.signal.aborted || isAbortError(requestError)) return;
 
         if (requestError instanceof ApiError && requestError.status === 404) {
           setNotFound(true);
@@ -123,12 +125,16 @@ export function RecipeDetailPage() {
   }, [recipeId, loadKey]);
 
   const handlePrint = async () => {
-    await document.fonts.ready;
+    try {
+      await document.fonts?.ready;
+    } catch {
+      // A impressão não depende do carregamento das fontes.
+    }
     window.print();
   };
 
   const handleDelete = async () => {
-    if (!recipe) return;
+    if (isDeleting || !recipe) return;
 
     setIsDeleting(true);
 
@@ -194,10 +200,10 @@ export function RecipeDetailPage() {
     );
   }
 
-  const title = recipe.nome?.trim() || 'Receita sem título';
-  const categoryName = recipe.categoria?.nome ?? 'Sem categoria';
-  const ingredients = splitLines(recipe.ingredientes).map((line) => line.replace(/^[-•*]\s*/, ''));
-  const steps = splitLines(recipe.modoPreparo);
+  const title = recipe.name?.trim() || 'Receita sem título';
+  const categoryName = recipe.category?.name ?? 'Sem categoria';
+  const ingredients = splitLines(recipe.ingredients).map((line) => line.replace(/^[-•*]\s*/, ''));
+  const steps = splitLines(recipe.instructions);
 
   return (
     <div className="space-y-6">
@@ -212,7 +218,7 @@ export function RecipeDetailPage() {
 
         <div className="flex flex-wrap items-center gap-2">
           <Link
-            to={`/receitas/${recipe.id}/editar`}
+            to={`/recipes/${recipe.id}/edit`}
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-olive-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-ink shadow-sm transition hover:border-olive-300 hover:bg-cream-50 focus-visible:ring-2 focus-visible:ring-olive-500"
           >
             <Pencil size={16} aria-hidden />
@@ -246,7 +252,7 @@ export function RecipeDetailPage() {
             <Badge variant="terracotta">{categoryName}</Badge>
             <Badge variant="neutral">
               <CalendarDays size={12} aria-hidden />
-              Atualizada em {formatDate(recipe.alteradoEm)}
+              Atualizada em {formatDate(recipe.updatedAt)}
             </Badge>
           </div>
 
@@ -258,22 +264,19 @@ export function RecipeDetailPage() {
             <MetaItem
               icon={Clock}
               label="Tempo de preparo"
-              value={formatMinutes(recipe.tempoPreparoMinutos)}
+              value={formatMinutes(recipe.preparationTimeMinutes)}
             />
-            <MetaItem icon={Users} label="Porções" value={formatPortions(recipe.porcoes)} />
-            <MetaItem icon={CalendarDays} label="Criada em" value={formatDate(recipe.criadoEm)} />
+            <MetaItem icon={Users} label="Porções" value={formatPortions(recipe.servings)} />
+            <MetaItem icon={CalendarDays} label="Criada em" value={formatDate(recipe.createdAt)} />
           </div>
         </div>
       </article>
 
       <div className="screen-only grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)] lg:items-start">
-        <section
-          className="paper-card p-6 lg:sticky lg:top-6"
-          aria-labelledby="titulo-ingredientes"
-        >
+        <section className="paper-card p-6 lg:sticky lg:top-6" aria-labelledby="ingredients-title">
           <div className="flex items-center justify-between gap-3">
             <h2
-              id="titulo-ingredientes"
+              id="ingredients-title"
               className="flex items-center gap-2 font-display text-xl font-semibold text-ink"
             >
               <ListChecks size={19} className="text-terracotta-600" aria-hidden />
@@ -306,9 +309,9 @@ export function RecipeDetailPage() {
           )}
         </section>
 
-        <section className="paper-card p-6 sm:p-8" aria-labelledby="titulo-preparo">
+        <section className="paper-card p-6 sm:p-8" aria-labelledby="instructions-title">
           <h2
-            id="titulo-preparo"
+            id="instructions-title"
             className="flex items-center gap-2 font-display text-2xl font-semibold text-ink"
           >
             <ChefHat size={21} className="text-terracotta-600" aria-hidden />
@@ -328,7 +331,7 @@ export function RecipeDetailPage() {
             </ol>
           ) : (
             <p className="mt-5 whitespace-pre-line text-[15px] leading-8 text-ink-soft">
-              {recipe.modoPreparo}
+              {recipe.instructions}
             </p>
           )}
         </section>
@@ -350,10 +353,10 @@ export function RecipeDetailPage() {
 
         <section className="print-avoid-break mt-5 grid grid-cols-2 gap-3 text-[11pt]">
           <p>
-            <strong>Tempo de preparo:</strong> {formatMinutes(recipe.tempoPreparoMinutos)}
+            <strong>Tempo de preparo:</strong> {formatMinutes(recipe.preparationTimeMinutes)}
           </p>
           <p>
-            <strong>Porções:</strong> {formatPortions(recipe.porcoes)}
+            <strong>Porções:</strong> {formatPortions(recipe.servings)}
           </p>
         </section>
 
@@ -388,14 +391,14 @@ export function RecipeDetailPage() {
             </ol>
           ) : (
             <p className="mt-3 whitespace-pre-line text-[11pt] leading-relaxed">
-              {recipe.modoPreparo}
+              {recipe.instructions}
             </p>
           )}
         </section>
 
         <footer className="mt-8 flex items-center justify-between border-t border-[#ccc] pt-3 text-[9pt] text-[#666]">
           <span>Meu Caderno de Receitas</span>
-          <span>Atualizada em {formatDate(recipe.alteradoEm, true)}</span>
+          <span>Atualizada em {formatDate(recipe.updatedAt, true)}</span>
         </footer>
       </article>
 

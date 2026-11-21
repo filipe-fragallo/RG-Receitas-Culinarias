@@ -12,4 +12,14 @@ export function applyTestEnvironment(): void {
   process.env.JWT_SECRET ??= 'test-only-secret-with-at-least-32-characters-long';
   process.env.JWT_EXPIRES_IN_SECONDS ??= '3600';
   process.env.CORS_ORIGIN ??= 'http://localhost:5173';
+  process.env.COOKIE_SECURE ??= 'false';
+  process.env.COOKIE_SAME_SITE ??= 'lax';
+  process.env.TRUST_PROXY ??= 'false';
+  process.env.TRUST_PROXY_HOPS ??= '1';
+  // Suítes funcionais usam limites altos; testes específicos de throttling
+  // sobrescrevem essas variáveis antes de criar a aplicação.
+  process.env.LOGIN_RATE_LIMIT_LIMIT ??= '1000';
+  process.env.LOGIN_RATE_LIMIT_TTL_MS ??= '60000';
+  process.env.REGISTER_RATE_LIMIT_LIMIT ??= '1000';
+  process.env.REGISTER_RATE_LIMIT_TTL_MS ??= '3600000';
 }

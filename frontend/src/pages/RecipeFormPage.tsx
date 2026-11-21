@@ -78,6 +78,7 @@ export function RecipeFormPage() {
   const [values, setValues] = useState<RecipeFormValues>(EMPTY_RECIPE_FORM);
   const [errors, setErrors] = useState<FormErrors<keyof RecipeFormValues>>({});
   const [categories, setCategories] = useState<Category[]>([]);
+  const [categoriesError, setCategoriesError] = useState<string | null>(null);
   const [isCategoriesLoading, setIsCategoriesLoading] = useState(true);
   const [isLoading, setIsLoading] = useState(isEditing);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -90,12 +91,16 @@ export function RecipeFormPage() {
   useEffect(() => {
     const controller = new AbortController();
     setIsCategoriesLoading(true);
+    setCategoriesError(null);
 
     categoriesApi
       .list(controller.signal)
-      .then(setCategories)
+      .then((items) => {
+        if (!controller.signal.aborted) setCategories(items);
+      })
       .catch((requestError: unknown) => {
-        if (isAbortError(requestError)) return;
+        if (controller.signal.aborted || isAbortError(requestError)) return;
+        setCategoriesError('Não foi possível carregar as categorias.');
         toast.error('Não foi possível carregar as categorias.');
       })
       .finally(() => {
@@ -103,10 +108,18 @@ export function RecipeFormPage() {
       });
 
     return () => controller.abort();
-  }, [toast]);
+  }, [toast, loadKey]);
 
   useEffect(() => {
     if (!isEditing) {
+      // O React reutiliza este componente entre /new and /:id/edit: limpar
+      // o estado evita que uma receita anterior vaze para um novo cadastro.
+      setValues(EMPTY_RECIPE_FORM);
+      setErrors({});
+      setNotFound(false);
+      setLoadError(null);
+      setServerError(null);
+      setServerDetails([]);
       setIsLoading(false);
       return;
     }
@@ -125,18 +138,19 @@ export function RecipeFormPage() {
     recipesApi
       .get(recipeId, controller.signal)
       .then((recipe) => {
+        if (controller.signal.aborted) return;
         setValues({
-          nome: recipe.nome ?? '',
-          categoriaId: recipe.categoria ? String(recipe.categoria.id) : '',
-          tempoPreparoMinutos:
-            recipe.tempoPreparoMinutos !== null ? String(recipe.tempoPreparoMinutos) : '',
-          porcoes: recipe.porcoes !== null ? String(recipe.porcoes) : '',
-          ingredientes: recipe.ingredientes ?? '',
-          modoPreparo: recipe.modoPreparo,
+          name: recipe.name ?? '',
+          categoryId: recipe.category ? String(recipe.category.id) : '',
+          preparationTimeMinutes:
+            recipe.preparationTimeMinutes !== null ? String(recipe.preparationTimeMinutes) : '',
+          servings: recipe.servings !== null ? String(recipe.servings) : '',
+          ingredients: recipe.ingredients ?? '',
+          instructions: recipe.instructions,
         });
       })
       .catch((requestError: unknown) => {
-        if (isAbortError(requestError)) return;
+        if (controller.signal.aborted || isAbortError(requestError)) return;
 
         if (requestError instanceof ApiError && requestError.status === 404) {
           setNotFound(true);
@@ -161,6 +175,7 @@ export function RecipeFormPage() {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isSubmitting) return;
     setServerError(null);
     setServerDetails([]);
 
@@ -172,12 +187,12 @@ export function RecipeFormPage() {
     }
 
     const payload: RecipeInput = {
-      nome: values.nome.trim(),
-      categoriaId: Number(values.categoriaId),
-      tempoPreparoMinutos: Number(values.tempoPreparoMinutos),
-      porcoes: Number(values.porcoes),
-      ingredientes: values.ingredientes.trim(),
-      modoPreparo: values.modoPreparo.trim(),
+      name: values.name.trim(),
+      categoryId: Number(values.categoryId),
+      preparationTimeMinutes: Number(values.preparationTimeMinutes),
+      servings: Number(values.servings),
+      ingredients: values.ingredients.trim(),
+      instructions: values.instructions.trim(),
     };
 
     setIsSubmitting(true);
@@ -188,7 +203,7 @@ export function RecipeFormPage() {
         : await recipesApi.create(payload);
 
       toast.success(isEditing ? 'Receita atualizada com sucesso.' : 'Receita criada. Bom apetite!');
-      navigate(`/receitas/${saved.id}`, { replace: true });
+      navigate(`/recipes/${saved.id}`, { replace: true });
     } catch (requestError) {
       setServerError(getErrorMessage(requestError));
       setServerDetails(getErrorDetails(requestError));
@@ -197,20 +212,21 @@ export function RecipeFormPage() {
     }
   };
 
+  const backTo = isEditing && Number.isInteger(recipeId) ? `/recipes/${recipeId}` : '/';
   const goBack = () => {
-    navigate(isEditing && Number.isInteger(recipeId) ? `/receitas/${recipeId}` : '/');
+    navigate(backTo);
   };
 
   const categoryOptions = categories.map((category) => ({
     value: String(category.id),
-    label: category.nome ?? `Categoria ${category.id}`,
+    label: category.name ?? `Categoria ${category.id}`,
   }));
 
   return (
     <div className="space-y-6">
       <div>
         <Link
-          to={isEditing ? `/receitas/${recipeId}` : '/'}
+          to={backTo}
           className="inline-flex items-center gap-1.5 rounded-lg text-sm font-semibold text-ink-soft transition hover:text-olive-800 focus-visible:ring-2 focus-visible:ring-olive-500"
         >
           <ArrowLeft size={16} aria-hidden />
@@ -282,57 +298,67 @@ export function RecipeFormPage() {
               />
 
               <TextField
-                id="nome-receita"
+                id="recipe-name"
                 label="Nome da receita"
-                value={values.nome}
-                onChange={(event) => handleChange('nome', event.target.value)}
-                error={errors.nome}
-                hint={`${values.nome.length}/45 caracteres`}
+                value={values.name}
+                onChange={(event) => handleChange('name', event.target.value)}
+                error={errors.name}
+                hint={`${values.name.length}/45 caracteres`}
                 placeholder="Ex.: Bolo de cenoura da vó"
                 maxLength={45}
                 required
               />
 
               <div className="grid gap-4 sm:grid-cols-3">
-                <SelectField
-                  id="categoria-receita"
-                  label="Categoria"
-                  placeholder={
-                    isCategoriesLoading ? 'Carregando categorias…' : 'Selecione uma categoria'
-                  }
-                  options={categoryOptions}
-                  value={values.categoriaId}
-                  onChange={(event) => handleChange('categoriaId', event.target.value)}
-                  error={errors.categoriaId}
-                  disabled={isCategoriesLoading}
-                  required
-                />
+                {categoriesError ? (
+                  <div className="sm:col-span-3" role="alert">
+                    <ErrorState
+                      title={categoriesError}
+                      description="Tente novamente para carregar as opções antes de salvar."
+                      onRetry={() => setLoadKey((current) => current + 1)}
+                    />
+                  </div>
+                ) : (
+                  <SelectField
+                    id="recipe-category"
+                    label="Categoria"
+                    placeholder={
+                      isCategoriesLoading ? 'Carregando categorias…' : 'Selecione uma categoria'
+                    }
+                    options={categoryOptions}
+                    value={values.categoryId}
+                    onChange={(event) => handleChange('categoryId', event.target.value)}
+                    error={errors.categoryId}
+                    disabled={isCategoriesLoading}
+                    required
+                  />
+                )}
 
                 <TextField
-                  id="tempo-preparo"
+                  id="preparation-time"
                   label="Tempo de preparo"
                   type="number"
                   inputMode="numeric"
                   min={1}
                   max={100000}
-                  value={values.tempoPreparoMinutos}
-                  onChange={(event) => handleChange('tempoPreparoMinutos', event.target.value)}
-                  error={errors.tempoPreparoMinutos}
+                  value={values.preparationTimeMinutes}
+                  onChange={(event) => handleChange('preparationTimeMinutes', event.target.value)}
+                  error={errors.preparationTimeMinutes}
                   hint="Em minutos. Ex.: 45"
                   placeholder="45"
                   required
                 />
 
                 <TextField
-                  id="porcoes"
+                  id="servings"
                   label="Porções"
                   type="number"
                   inputMode="numeric"
                   min={1}
                   max={1000}
-                  value={values.porcoes}
-                  onChange={(event) => handleChange('porcoes', event.target.value)}
-                  error={errors.porcoes}
+                  value={values.servings}
+                  onChange={(event) => handleChange('servings', event.target.value)}
+                  error={errors.servings}
                   hint="Quantas pessoas serve?"
                   placeholder="8"
                   required
@@ -347,11 +373,11 @@ export function RecipeFormPage() {
                 description="Uma linha por ingrediente deixa a leitura mais clara."
               />
               <TextAreaField
-                id="ingredientes"
+                id="ingredients"
                 label="O que vai na receita"
-                value={values.ingredientes}
-                onChange={(event) => handleChange('ingredientes', event.target.value)}
-                error={errors.ingredientes}
+                value={values.ingredients}
+                onChange={(event) => handleChange('ingredients', event.target.value)}
+                error={errors.ingredients}
                 hint="Ex.: 3 cenouras médias · 3 ovos · 2 xícaras de farinha"
                 placeholder={'3 cenouras médias\n3 ovos\n2 xícaras de farinha de trigo'}
                 rows={8}
@@ -368,11 +394,11 @@ export function RecipeFormPage() {
                 description="Descreva o passo a passo, inclusive os detalhes que fazem diferença."
               />
               <TextAreaField
-                id="modo-preparo"
+                id="instructions"
                 label="Como preparar"
-                value={values.modoPreparo}
-                onChange={(event) => handleChange('modoPreparo', event.target.value)}
-                error={errors.modoPreparo}
+                value={values.instructions}
+                onChange={(event) => handleChange('instructions', event.target.value)}
+                error={errors.instructions}
                 hint="Você pode usar uma linha por etapa ou escrever em parágrafos."
                 placeholder={
                   'Bata as cenouras, os ovos e o óleo no liquidificador.\nMisture os ingredientes secos e asse por 40 minutos.'

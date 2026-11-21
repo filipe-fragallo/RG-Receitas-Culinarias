@@ -7,13 +7,16 @@ import { Badge } from '../ui/Badge';
 import { Skeleton } from '../ui/Skeleton';
 
 export function RecipeCard({ recipe }: { recipe: Recipe }) {
-  const title = recipe.nome?.trim() || 'Receita sem título';
-  const categoryName = recipe.categoria?.nome ?? 'Sem categoria';
-  const ingredientPreview = splitLines(recipe.ingredientes).slice(0, 2).join(' · ');
+  const title = recipe.name?.trim() || 'Receita sem título';
+  const categoryName = recipe.category?.name ?? 'Sem categoria';
+  const ingredientPreview = splitLines(recipe.ingredients)
+    .map((line) => line.replace(/^[-•*]\s*/, ''))
+    .slice(0, 2)
+    .join(' · ');
 
   return (
     <Link
-      to={`/receitas/${recipe.id}`}
+      to={`/recipes/${recipe.id}`}
       className="group block h-full rounded-2xl focus-visible:ring-2 focus-visible:ring-olive-500 focus-visible:ring-offset-2"
       aria-label={`Ver detalhes da receita ${title}`}
     >
@@ -32,11 +35,11 @@ export function RecipeCard({ recipe }: { recipe: Recipe }) {
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs font-medium text-ink-muted">
           <span className="inline-flex items-center gap-1.5">
             <Clock size={14} className="text-olive-500" aria-hidden />
-            {formatMinutes(recipe.tempoPreparoMinutos)}
+            {formatMinutes(recipe.preparationTimeMinutes)}
           </span>
           <span className="inline-flex items-center gap-1.5">
             <Users size={14} className="text-olive-500" aria-hidden />
-            {formatPortions(recipe.porcoes)}
+            {formatPortions(recipe.servings)}
           </span>
         </div>
 
@@ -52,7 +55,7 @@ export function RecipeCard({ recipe }: { recipe: Recipe }) {
         )}
 
         <div className="mt-auto flex items-center justify-between gap-3 border-t border-olive-100 pt-4 text-xs text-ink-muted">
-          <span>Atualizada em {formatDate(recipe.alteradoEm)}</span>
+          <span>Atualizada em {formatDate(recipe.updatedAt)}</span>
           <span className="font-semibold text-olive-700 transition group-hover:text-olive-900">
             Ver receita
           </span>

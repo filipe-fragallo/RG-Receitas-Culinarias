@@ -1,6 +1,6 @@
 import { BookOpenText, LogOut, Plus, Sparkles } from 'lucide-react';
 import { useState } from 'react';
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet } from 'react-router-dom';
 
 import { useAuth } from '../../hooks/useAuth';
 import { getFirstName, getInitials } from '../../lib/format';
@@ -17,21 +17,25 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 
 export function AppShell() {
   const { user, logout } = useAuth();
-  const navigate = useNavigate();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
-    await logout();
-    navigate('/login', { replace: true });
+    try {
+      // O ProtectedRoute faz o redirecionamento quando o status muda para anônimo.
+      await logout();
+    } finally {
+      // Em falha de rede a sessão permanece ativa para uma nova tentativa.
+      setIsLoggingOut(false);
+    }
   };
 
-  const displayName = user?.nome ?? user?.login ?? '';
+  const displayName = user?.name ?? user?.login ?? '';
   const firstName = getFirstName(displayName);
 
   return (
     <div className="min-h-screen lg:pl-72">
-      <a href="#conteudo" className="skip-link no-print">
+      <a href="#content" className="skip-link no-print">
         Pular para o conteúdo
       </a>
 
@@ -58,7 +62,7 @@ export function AppShell() {
             <BookOpenText size={19} aria-hidden />
             Minhas receitas
           </NavLink>
-          <NavLink to="/receitas/nova" className={navLinkClass}>
+          <NavLink to="/recipes/new" className={navLinkClass}>
             <Plus size={19} aria-hidden />
             Nova receita
           </NavLink>
@@ -78,7 +82,7 @@ export function AppShell() {
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-terracotta-600 text-sm font-bold text-white"
             aria-hidden
           >
-            {user ? getInitials(user.nome, user.login) : '?'}
+            {user ? getInitials(user.name, user.login) : '?'}
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-cream-50">{displayName}</p>
@@ -104,7 +108,7 @@ export function AppShell() {
           </Link>
           <div className="flex items-center gap-2">
             <Link
-              to="/receitas/nova"
+              to="/recipes/new"
               className="inline-flex items-center gap-1.5 rounded-lg bg-olive-800 px-3 py-2 text-xs font-semibold text-cream-50 shadow-sm transition hover:bg-olive-900 focus-visible:ring-2 focus-visible:ring-olive-500"
             >
               <Plus size={15} aria-hidden />
@@ -130,7 +134,7 @@ export function AppShell() {
             Olá, {firstName}
           </p>
         )}
-        <main id="conteudo">
+        <main id="content" tabIndex={-1}>
           <Outlet />
         </main>
         <footer className="no-print mt-16 border-t border-olive-100 pt-6 text-center text-xs text-ink-muted">

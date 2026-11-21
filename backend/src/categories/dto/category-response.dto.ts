@@ -5,5 +5,5 @@ export class CategoryResponseDto {
   id!: number;
 
   @ApiProperty({ example: 'Bolos e tortas doces', nullable: true })
-  nome!: string | null;
+  name!: string | null;
 }

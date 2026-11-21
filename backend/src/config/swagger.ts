@@ -8,26 +8,43 @@ export function setupSwagger(app: INestApplication): void {
       [
         'API REST para cadastro de usuários e gestão de receitas culinárias.',
         '',
-        '**Autenticação:** envie `Authorization: Bearer <accessToken>` nas rotas protegidas.',
-        'O token é obtido em `POST /api/auth/login` ou `POST /api/auth/register`.',
+        '**Autenticação:** o JWT é definido pelo servidor no cookie HttpOnly `rg_auth` ' +
+          'em `/api/auth/login` e `/api/auth/register`. O cliente não lê nem envia o JWT.',
         '',
-        '**Isolamento:** todas as consultas de receitas são filtradas pelo usuário do token.',
+        '**CSRF:** requisições POST/PATCH/DELETE devem enviar o header `X-CSRF-Token` ' +
+          'com o valor devolvido por `/api/auth/csrf`, `/api/auth/login`, ' +
+          '`/api/auth/register` ou `/api/auth/me`.',
+        '',
+        '**Sessão:** o logout revoga a sessão no banco; tokens revogados retornam 401.',
+        '',
+        '**Isolamento:** todas as consultas de receitas são filtradas pelo usuário da sessão.',
+        '',
+        '**Nomes:** os identificadores públicos são em inglês; os nomes físicos do MySQL permanecem originais.',
       ].join('\n'),
     )
     .setVersion('1.0.0')
-    .addBearerAuth(
+    .addApiKey(
       {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        description: 'Token retornado por /api/auth/login',
+        type: 'apiKey',
+        in: 'cookie',
+        name: 'rg_auth',
+        description: 'Cookie HttpOnly definido no login/cadastro.',
       },
-      'access-token',
+      'auth-cookie',
+    )
+    .addApiKey(
+      {
+        type: 'apiKey',
+        in: 'header',
+        name: 'X-CSRF-Token',
+        description: 'Token CSRF vinculado à sessão.',
+      },
+      'csrf-token',
     )
     .addTag('Auth', 'Cadastro, login, sessão e logout')
-    .addTag('Categorias', 'Categorias pré-cadastradas no banco')
-    .addTag('Receitas', 'CRUD de receitas do usuário autenticado')
-    .addTag('Saúde', 'Verificação de disponibilidade da API')
+    .addTag('Categories', 'Categorias pré-cadastradas no banco')
+    .addTag('Recipes', 'CRUD de receitas do usuário autenticado')
+    .addTag('Health', 'Verificação de disponibilidade da API')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

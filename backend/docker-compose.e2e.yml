@@ -1,0 +1,44 @@
+# Overlay exclusivo para E2E em navegador.
+#
+# Uso (a partir de backend/):
+#   docker compose -f docker-compose.yml -f docker-compose.e2e.yml \
+#     -p receitas-e2e --profile full up -d --build --wait
+#   ... executar Playwright com E2E_BASE_URL=http://localhost:8091 ...
+#   docker compose -f docker-compose.yml -f docker-compose.e2e.yml \
+#     -p receitas-e2e --profile full down -v
+#
+# Este overlay NÃO é carregado pelo comando padrão. Use sempre -p receitas-e2e
+# e volume próprio: nenhum dado de desenvolvimento é reutilizado. Suas portas
+# publicadas também ficam restritas a 127.0.0.1.
+# `!override` substitui portas/volumes do arquivo base em vez de acumulá-los.
+
+services:
+  mysql:
+    environment:
+      MYSQL_DATABASE: teste_receitas_rg_sistemas_playwright
+    ports: !override
+      - "127.0.0.1:${E2E_MYSQL_HOST_PORT:-3311}:3306"
+    volumes: !override
+      - mysql_e2e_data:/var/lib/mysql
+
+  migrate:
+    environment:
+      DB_NAME: teste_receitas_rg_sistemas_playwright
+
+  backend:
+    environment:
+      DB_NAME: teste_receitas_rg_sistemas_playwright
+      CORS_ORIGIN: http://localhost:${E2E_FRONTEND_HOST_PORT:-8091}
+      # Os 20 cenários criam contas e sessões distintas; o limite de produção é
+      # exercitado por uma API temporária iniciada pelo próprio Playwright.
+      LOGIN_RATE_LIMIT_LIMIT: '100'
+      REGISTER_RATE_LIMIT_LIMIT: '100'
+    ports: !override
+      - "127.0.0.1:${E2E_BACKEND_HOST_PORT:-3011}:3000"
+
+  frontend:
+    ports: !override
+      - "${E2E_FRONTEND_HOST_PORT:-8091}:80"
+
+volumes:
+  mysql_e2e_data:

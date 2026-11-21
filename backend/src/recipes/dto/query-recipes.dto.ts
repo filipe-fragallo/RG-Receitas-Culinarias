@@ -2,7 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
-export const RECIPE_SORT_FIELDS = ['nome', 'criadoEm', 'alteradoEm'] as const;
+export const RECIPE_SORT_FIELDS = ['name', 'createdAt', 'updatedAt'] as const;
 export const SORT_ORDERS = ['asc', 'desc'] as const;
 
 export type RecipeSortField = (typeof RECIPE_SORT_FIELDS)[number];
@@ -36,12 +36,12 @@ export class QueryRecipesDto {
   @IsOptional()
   @IsInt({ message: 'A categoria deve ser um número inteiro.' })
   @Min(1, { message: 'A categoria deve ser maior que zero.' })
-  categoriaId?: number;
+  categoryId?: number;
 
-  @ApiPropertyOptional({ enum: RECIPE_SORT_FIELDS, default: 'criadoEm' })
+  @ApiPropertyOptional({ enum: RECIPE_SORT_FIELDS, default: 'createdAt' })
   @IsOptional()
   @IsIn(RECIPE_SORT_FIELDS, { message: 'Ordenação inválida.' })
-  sortBy: RecipeSortField = 'criadoEm';
+  sortBy: RecipeSortField = 'createdAt';
 
   @ApiPropertyOptional({ enum: SORT_ORDERS, default: 'desc' })
   @IsOptional()

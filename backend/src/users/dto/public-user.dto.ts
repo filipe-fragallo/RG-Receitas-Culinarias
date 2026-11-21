@@ -5,11 +5,11 @@ export class PublicUserDto {
   id!: number;
 
   @ApiProperty({ example: 'Maria Silva', nullable: true })
-  nome!: string | null;
+  name!: string | null;
 
   @ApiProperty({ example: 'maria.silva' })
   login!: string;
 
   @ApiProperty({ example: '2026-01-15T12:00:00.000Z', format: 'date-time' })
-  criadoEm!: Date;
+  createdAt!: Date;
 }

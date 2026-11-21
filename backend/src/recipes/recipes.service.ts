@@ -1,26 +1,39 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectModel } from '@nestjs/sequelize';
+import { Op, Order, WhereOptions, col, fn, literal, where } from 'sequelize';
+import type { IncludeOptions } from 'sequelize';
 
 import { CategoriesService } from '../categories/categories.service';
-import { Category } from '../categories/category.entity';
+import { Category } from '../database/models/category.model';
+import { Recipe } from '../database/models/recipe.model';
 import { CreateRecipeDto } from './dto/create-recipe.dto';
 import { QueryRecipesDto } from './dto/query-recipes.dto';
 import { PaginatedRecipesDto, RecipeResponseDto, RecipeStatsDto } from './dto/recipe-response.dto';
 import { UpdateRecipeDto } from './dto/update-recipe.dto';
-import { Recipe } from './recipe.entity';
 
-const SORT_COLUMNS = {
-  nome: 'receita.nome',
-  criadoEm: 'receita.criadoEm',
-  alteradoEm: 'receita.alteradoEm',
+const SORT_ATTRIBUTES = {
+  name: 'name',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
 } as const;
+
+const CATEGORY_INCLUDE: IncludeOptions = {
+  model: Category,
+  as: 'category',
+  attributes: ['id', 'name'],
+  required: false,
+};
+
+interface StatsRow {
+  totalRecipes: number | string | null;
+  categoriesUsed: number | string | null;
+  lastUpdatedAt: Date | string | null;
+}
 
 @Injectable()
 export class RecipesService {
   constructor(
-    @InjectRepository(Recipe)
-    private readonly recipesRepository: Repository<Recipe>,
+    @InjectModel(Recipe) private readonly recipeModel: typeof Recipe,
     private readonly categoriesService: CategoriesService,
   ) {}
 
@@ -28,37 +41,39 @@ export class RecipesService {
     const page = Math.max(query.page ?? 1, 1);
     const limit = Math.min(Math.max(query.limit ?? 9, 1), 50);
 
-    const queryBuilder = this.recipesRepository
-      .createQueryBuilder('receita')
-      .leftJoinAndSelect('receita.categoria', 'categoria')
-      .where('receita.idUsuarios = :userId', { userId });
+    const conditions: WhereOptions<Recipe>[] = [{ userId }];
 
     if (query.search) {
       // LOCATE evita que % e _ digitados pelo usuário sejam interpretados
-      // como curingas de LIKE. A collation do MySQL mantém a busca sem
-      // diferença entre maiúsculas e minúsculas.
-      queryBuilder.andWhere('LOCATE(:search, receita.nome) > 0', { search: query.search });
+      // como curingas de LIKE. A collation do MySQL mantém a busca
+      // sem diferença entre maiúsculas e minúsculas.
+      conditions.push(where(fn('LOCATE', query.search, col('Recipe.nome')), { [Op.gt]: 0 }));
     }
 
-    if (query.categoriaId) {
-      queryBuilder.andWhere('receita.idCategorias = :categoriaId', {
-        categoriaId: query.categoriaId,
-      });
+    if (query.categoryId) {
+      conditions.push({ categoryId: query.categoryId });
     }
 
-    const sortColumn = SORT_COLUMNS[query.sortBy] ?? SORT_COLUMNS.criadoEm;
+    const sortAttribute = SORT_ATTRIBUTES[query.sortBy] ?? SORT_ATTRIBUTES.createdAt;
     const direction = query.order === 'asc' ? 'ASC' : 'DESC';
+    const order: Order = [
+      [sortAttribute, direction],
+      ['id', direction],
+    ];
 
-    queryBuilder
-      .orderBy(sortColumn, direction)
-      .addOrderBy('receita.id', direction)
-      .skip((page - 1) * limit)
-      .take(limit);
+    const { rows, count } = await this.recipeModel.findAndCountAll({
+      where: { [Op.and]: conditions },
+      include: [CATEGORY_INCLUDE],
+      order,
+      limit,
+      offset: (page - 1) * limit,
+      distinct: true,
+    });
 
-    const [recipes, total] = await queryBuilder.getManyAndCount();
+    const total = Array.isArray(count) ? count.length : count;
 
     return {
-      data: recipes.map((recipe) => this.toResponse(recipe)),
+      data: rows.map((recipe) => this.toResponse(recipe)),
       meta: {
         page,
         limit,
@@ -74,21 +89,19 @@ export class RecipesService {
   }
 
   async create(userId: number, dto: CreateRecipeDto): Promise<RecipeResponseDto> {
-    const category = await this.findCategoryOrFail(dto.categoriaId);
+    const category = await this.findCategoryOrFail(dto.categoryId);
 
-    const recipe = this.recipesRepository.create({
-      idUsuarios: userId,
-      idCategorias: category.id,
-      categoria: category,
-      nome: dto.nome,
-      tempoPreparoMinutos: dto.tempoPreparoMinutos,
-      porcoes: dto.porcoes,
-      ingredientes: dto.ingredientes,
-      modoPreparo: dto.modoPreparo,
+    const recipe = await this.recipeModel.create({
+      userId,
+      categoryId: category.id,
+      name: dto.name,
+      preparationTimeMinutes: dto.preparationTimeMinutes,
+      servings: dto.servings,
+      ingredients: dto.ingredients,
+      instructions: dto.instructions,
     });
 
-    const saved = await this.recipesRepository.save(recipe);
-    return this.findOne(userId, saved.id);
+    return this.findOne(userId, recipe.id);
   }
 
   async update(userId: number, id: number, dto: UpdateRecipeDto): Promise<RecipeResponseDto> {
@@ -100,46 +113,43 @@ export class RecipesService {
 
     const recipe = await this.findOwnedRecipeOrFail(userId, id);
 
-    if (dto.categoriaId !== undefined) {
-      const category = await this.findCategoryOrFail(dto.categoriaId);
-      recipe.idCategorias = category.id;
-      recipe.categoria = category;
+    if (dto.categoryId !== undefined) {
+      const category = await this.findCategoryOrFail(dto.categoryId);
+      recipe.categoryId = category.id;
     }
 
-    if (dto.nome !== undefined) recipe.nome = dto.nome;
-    if (dto.tempoPreparoMinutos !== undefined) {
-      recipe.tempoPreparoMinutos = dto.tempoPreparoMinutos;
+    if (dto.name !== undefined) recipe.name = dto.name;
+    if (dto.preparationTimeMinutes !== undefined) {
+      recipe.preparationTimeMinutes = dto.preparationTimeMinutes;
     }
-    if (dto.porcoes !== undefined) recipe.porcoes = dto.porcoes;
-    if (dto.ingredientes !== undefined) recipe.ingredientes = dto.ingredientes;
-    if (dto.modoPreparo !== undefined) recipe.modoPreparo = dto.modoPreparo;
+    if (dto.servings !== undefined) recipe.servings = dto.servings;
+    if (dto.ingredients !== undefined) recipe.ingredients = dto.ingredients;
+    if (dto.instructions !== undefined) recipe.instructions = dto.instructions;
 
-    await this.recipesRepository.save(recipe);
+    await recipe.save();
     return this.findOne(userId, id);
   }
 
   async remove(userId: number, id: number): Promise<void> {
     const recipe = await this.findOwnedRecipeOrFail(userId, id);
-    await this.recipesRepository.remove(recipe);
+    await recipe.destroy();
   }
 
   async stats(userId: number): Promise<RecipeStatsDto> {
-    const raw = await this.recipesRepository
-      .createQueryBuilder('receita')
-      .select('COUNT(receita.id)', 'totalReceitas')
-      .addSelect('COUNT(DISTINCT receita.idCategorias)', 'categoriasUtilizadas')
-      .addSelect('MAX(receita.alteradoEm)', 'atualizadaEm')
-      .where('receita.idUsuarios = :userId', { userId })
-      .getRawOne<{
-        totalReceitas: string;
-        categoriasUtilizadas: string;
-        atualizadaEm: string | Date | null;
-      }>();
+    const raw = (await this.recipeModel.findOne({
+      attributes: [
+        [fn('COUNT', col('id')), 'totalRecipes'],
+        [literal('COUNT(DISTINCT `id_categorias`)'), 'categoriesUsed'],
+        [fn('MAX', col('alterado_em')), 'lastUpdatedAt'],
+      ],
+      where: { userId },
+      raw: true,
+    })) as unknown as StatsRow | null;
 
     return {
-      totalReceitas: Number(raw?.totalReceitas ?? 0),
-      categoriasUtilizadas: Number(raw?.categoriasUtilizadas ?? 0),
-      atualizadaEm: raw?.atualizadaEm ? new Date(raw.atualizadaEm) : null,
+      totalRecipes: Number(raw?.totalRecipes ?? 0),
+      categoriesUsed: Number(raw?.categoriesUsed ?? 0),
+      lastUpdatedAt: raw?.lastUpdatedAt ? new Date(raw.lastUpdatedAt) : null,
     };
   }
 
@@ -148,9 +158,9 @@ export class RecipesService {
    * usuários simplesmente não são encontradas, sem revelar sua existência.
    */
   private async findOwnedRecipeOrFail(userId: number, id: number): Promise<Recipe> {
-    const recipe = await this.recipesRepository.findOne({
-      where: { id, idUsuarios: userId },
-      relations: { categoria: true },
+    const recipe = await this.recipeModel.findOne({
+      where: { id, userId },
+      include: [CATEGORY_INCLUDE],
     });
 
     if (!recipe) {
@@ -173,14 +183,14 @@ export class RecipesService {
   private toResponse(recipe: Recipe): RecipeResponseDto {
     return {
       id: recipe.id,
-      nome: recipe.nome,
-      categoria: recipe.categoria ? { id: recipe.categoria.id, nome: recipe.categoria.nome } : null,
-      tempoPreparoMinutos: recipe.tempoPreparoMinutos,
-      porcoes: recipe.porcoes,
-      ingredientes: recipe.ingredientes,
-      modoPreparo: recipe.modoPreparo,
-      criadoEm: recipe.criadoEm,
-      alteradoEm: recipe.alteradoEm,
+      name: recipe.name,
+      category: recipe.category ? { id: recipe.category.id, name: recipe.category.name } : null,
+      preparationTimeMinutes: recipe.preparationTimeMinutes,
+      servings: recipe.servings,
+      ingredients: recipe.ingredients,
+      instructions: recipe.instructions,
+      createdAt: recipe.createdAt,
+      updatedAt: recipe.updatedAt,
     };
   }
 }
