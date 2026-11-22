@@ -4,7 +4,6 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 import { isVercelRuntime } from './runtime';
 
-
 /**
  * A Vercel Function não inclui automaticamente os assets estáticos do
  * swagger-ui-dist. Para evitar 404 em /api/docs/*.js e *.css, a página
