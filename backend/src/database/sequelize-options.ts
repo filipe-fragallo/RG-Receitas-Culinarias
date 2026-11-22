@@ -1,5 +1,5 @@
 import { SequelizeModuleOptions } from '@nestjs/sequelize';
-
+import * as mysql2 from 'mysql2';
 import { DB_SSL_REJECT_MESSAGE, type DatabaseSslOptions } from '../config/database-ssl';
 import { AuthSession } from './models/auth-session.model';
 import { Category } from './models/category.model';
@@ -42,6 +42,7 @@ export function buildSequelizeOptions(
 
   return {
     dialect: 'mysql',
+    dialectModule: mysql2,
     host: connection.host,
     port: connection.port,
     username: connection.username,
