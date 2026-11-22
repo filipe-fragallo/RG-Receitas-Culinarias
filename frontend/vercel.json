@@ -3,11 +3,11 @@
   "rewrites": [
     {
       "source": "/api",
-      "destination": "https://__BACKEND_VERCEL_HOST__/api"
+      "destination": "https://rg-receitas-culinarias.vercel.app/api"
     },
     {
       "source": "/api/:path*",
-      "destination": "https://__BACKEND_VERCEL_HOST__/api/:path*"
+      "destination": "https://rg-receitas-culinarias.vercel.app/api/:path*"
     },
     {
       "source": "/(.*)",
