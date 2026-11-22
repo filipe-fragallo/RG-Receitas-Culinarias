@@ -14,11 +14,15 @@ export interface DatabaseTarget {
   allowedRemoteHost?: string;
   allowProductionMigrations?: boolean;
   migrationsAuto?: boolean;
+  sslEnabled?: boolean;
 }
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '::ffff:127.0.0.1']);
 
-const APP_SCHEMA = 'teste_receitas_rg_sistemas';
+export const PRODUCTION_DB_SCHEMA = 'teste_receitas_rg_sistemas';
+export const PRODUCTION_DB_HOST = 'gateway01.sa-east-1.prod.aws.tidbcloud.com';
+
+const APP_SCHEMA = PRODUCTION_DB_SCHEMA;
 
 /** Nomes que nunca são aceitos como alvo de escrita/deletes pelo projeto. */
 const FORBIDDEN_SCHEMAS = new Set([
@@ -132,6 +136,53 @@ export function assertDatabaseWriteAllowed(target: DatabaseTarget): void {
 }
 
 /**
+ * Barreiras do provisionamento inicial de produção. Todas são avaliadas antes
+ * de abrir conexão: host nominal, schema exato, TLS, NODE_ENV e confirmação.
+ */
+export function assertProductionSetupTarget(
+  target: DatabaseTarget,
+  confirmation: string | undefined,
+): void {
+  if (confirmation !== '--yes') {
+    throw new Error(
+      'Setup de produção recusado: confirme explicitamente com --yes. ' +
+        'Exemplo: npm run db:setup:prod -- --yes',
+    );
+  }
+
+  if (target.nodeEnv !== 'production') {
+    throw new Error(
+      `Setup de produção recusado: NODE_ENV deve ser "production" (recebido: "${target.nodeEnv ?? 'vazio'}").`,
+    );
+  }
+
+  if (schemaOf(target) !== PRODUCTION_DB_SCHEMA) {
+    throw new Error(
+      `Setup de produção recusado: DB_NAME deve ser "${PRODUCTION_DB_SCHEMA}" ` +
+        `(recebido: "${schemaOf(target) || 'vazio'}").`,
+    );
+  }
+
+  const host = (target.host ?? '').trim().toLowerCase();
+  if (host !== PRODUCTION_DB_HOST) {
+    throw new Error(
+      `Setup de produção recusado: DB_HOST deve ser "${PRODUCTION_DB_HOST}" ` +
+        `(recebido: "${target.host || 'vazio'}").`,
+    );
+  }
+
+  if (target.sslEnabled !== true) {
+    throw new Error(
+      'Setup de produção recusado: DB_SSL=true é obrigatório para conectar ao TiDB Cloud.',
+    );
+  }
+
+  // Reaproveita a política de escrita: exige DB_ALLOW_REMOTE com host nominal e
+  // DB_ALLOW_PRODUCTION_MIGRATIONS, sem permitir nomes de schema desconhecidos.
+  assertDatabaseWriteAllowed(target);
+}
+
+/**
  * Validação para db:down e db:reset.
  */
 export function assertDestructiveDatabaseAction(
@@ -179,11 +230,16 @@ export function assertDestructiveDatabaseAction(
  *
  * - produção: nunca (use db:migrate explícito e autorizado);
  * - desenvolvimento local: sim, com schema válido;
- * - host remoto: somente com DB_MIGRATIONS_AUTO=true e autorização nominal.
+ * - host remoto (inclui TiDB Cloud): nunca, independentemente de
+ *   DB_MIGRATIONS_AUTO ou DB_ALLOW_REMOTE. Migrations remotas exigem comando
+ *   explícito e autorização nominal.
  */
 export function shouldRunMigrationsOnBootstrap(target: DatabaseTarget): boolean {
   if (target.nodeEnv === 'production') return false;
   if (target.migrationsAuto === false) return false;
+
+  // Barreira incondicional: nenhum host remoto recebe DDL no bootstrap.
+  if (!isLoopbackHost(target.host)) return false;
 
   try {
     assertDatabaseWriteAllowed(target);
@@ -191,5 +247,5 @@ export function shouldRunMigrationsOnBootstrap(target: DatabaseTarget): boolean 
     return false;
   }
 
-  return isLoopbackHost(target.host) || target.migrationsAuto === true;
+  return true;
 }

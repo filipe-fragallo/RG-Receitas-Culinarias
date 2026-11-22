@@ -30,6 +30,7 @@ receitas, pesquisa, filtros, paginação, responsividade e impressão A4.
 17. [Capturas de tela](#17-capturas-de-tela)
 18. [Problemas comuns](#18-problemas-comuns)
 19. [Limitações conhecidas e avaliação](#19-limitações-conhecidas-e-avaliação)
+20. [Deploy na Vercel](#20-deploy-na-vercel)
 
 ---
 
@@ -403,6 +404,29 @@ Rotas de avaliação:
 Roteiro rápido de demonstração: abrir a aplicação → criar conta → criar receita → pesquisar e
 filtrar → abrir detalhe → editar → imprimir → excluir com confirmação → sair → tentar abrir `/` →
 abrir Swagger e executar `GET /api/recipes`.
+
+## 20. Deploy na Vercel
+
+O projeto Vercel do frontend usa **Root Directory = `frontend/`**, framework Vite e
+`VITE_API_URL=/api`. O arquivo `vercel.json` contém dois papéis:
+
+1. rewrites `/api` e `/api/:path*` para o backend público;
+2. fallback SPA de qualquer outra rota para `/index.html`.
+
+O destino do rewrite está marcado com `__BACKEND_VERCEL_HOST__` (somente o host, sem `https://`).
+**Não substitua esse placeholder por um domínio inventado.** Após criar o projeto de backend e
+obter a URL real de produção, preencha o secret `PROD_BACKEND_URL` com a URL HTTPS completa; o
+workflow `.github/workflows/production.yml` extrai o host e substitui o placeholder no runner antes
+do build. Para um deploy manual fora do workflow, faça a substituição localmente e não commite o
+resultado com o domínio real.
+
+Como o navegador continua chamando `/api` no mesmo domínio da SPA, os cookies `HttpOnly` com
+`Path=/api` e sem `Domain` são enviados normalmente. A origem pública da SPA deve constar em
+`CORS_ORIGIN` no backend, e `COOKIE_SECURE=true` é obrigatório em HTTPS.
+
+Publicações de frontend não criam nem migram banco. Use as operações `deploy-frontend` ou
+`deploy-all` do workflow manual; somente `provision-database` e `migrate-database` tocam no TiDB
+Cloud.
 
 ---
 

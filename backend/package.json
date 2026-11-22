@@ -24,6 +24,8 @@
     "db:reset": "ts-node src/database/cli.ts reset",
     "db:status": "ts-node src/database/cli.ts status",
     "db:baseline": "ts-node src/database/cli.ts baseline",
+    "db:check": "ts-node src/database/cli.ts check",
+    "db:setup:prod": "ts-node src/database/cli.ts setup-prod",
     "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
     "test:all": "npm test && npm run test:integration && npm run test:e2e",
     "db:down": "ts-node src/database/cli.ts down"

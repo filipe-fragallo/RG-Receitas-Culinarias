@@ -4,6 +4,7 @@ import { createConnection, type Connection, type RowDataPacket } from 'mysql2/pr
 import { QueryInterface, Sequelize } from 'sequelize';
 import { SequelizeStorage, Umzug } from 'umzug';
 
+import { databaseSslOptionsFromSequelize } from '../config/database-ssl';
 import * as createUsers from './migrations/001-create-usuarios';
 import * as createCategories from './migrations/002-create-categorias';
 import * as createRecipes from './migrations/003-create-receitas';
@@ -151,12 +152,17 @@ export async function withMigrationLock<T>(
     database?: string;
   };
   const lockName = migrationLockName(config.database);
+  // Reusa as opções TLS já validadas na conexão Sequelize. Isso garante que
+  // GET_LOCK/RELEASE_LOCK usem exatamente a mesma CA e a mesma validação de
+  // hostname da aplicação — nunca `rejectUnauthorized: false`.
+  const ssl = databaseSslOptionsFromSequelize(sequelize);
   const connection: Connection = await createConnection({
     host: config.host ?? '127.0.0.1',
     port: config.port ?? 3306,
     user: config.username,
     password: config.password,
     database: config.database,
+    ...(ssl ? { ssl } : {}),
   });
 
   try {

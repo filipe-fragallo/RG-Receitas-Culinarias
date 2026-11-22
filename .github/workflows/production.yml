@@ -1,0 +1,166 @@
+name: Produção (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'O que executar (provisionar nunca acontece junto com deploy de frontend)'
+        required: true
+        type: choice
+        default: migrate-database
+        options:
+          - provision-database
+          - migrate-database
+          - deploy-backend
+          - deploy-frontend
+          - deploy-all
+      confirm:
+        description: 'Confirmo que esta execução é intencional em produção'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  production:
+    name: ${{ inputs.operation }}
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    env:
+      PROD_DB_HOST: ${{ secrets.PROD_DB_HOST }}
+      PROD_DB_PORT: ${{ secrets.PROD_DB_PORT }}
+      PROD_DB_USER: ${{ secrets.PROD_DB_USER }}
+      PROD_DB_PASSWORD: ${{ secrets.PROD_DB_PASSWORD }}
+      PROD_DB_NAME: ${{ secrets.PROD_DB_NAME }}
+      PROD_DB_SSL_CA: ${{ secrets.PROD_DB_SSL_CA }}
+      PROD_BACKEND_URL: ${{ secrets.PROD_BACKEND_URL }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID_BACKEND: ${{ secrets.VERCEL_PROJECT_ID_BACKEND }}
+      VERCEL_PROJECT_ID_FRONTEND: ${{ secrets.VERCEL_PROJECT_ID_FRONTEND }}
+
+    steps:
+      - name: Confirmação explícita
+        if: ${{ inputs.confirm != true }}
+        run: |
+          echo "Marque 'confirm' para executar uma ação de produção."
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Instala dependências do backend
+        if: ${{ contains(fromJSON('["provision-database","migrate-database","deploy-all"]'), inputs.operation) }}
+        working-directory: backend
+        run: npm ci
+
+      - name: Prepara CA do TiDB Cloud
+        if: ${{ contains(fromJSON('["provision-database","migrate-database","deploy-all"]'), inputs.operation) }}
+        env:
+          CA_PATH: ${{ runner.temp }}/tidb-ca.pem
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const pem = process.env.PROD_DB_SSL_CA || "";
+            if (!pem.trim()) throw new Error("PROD_DB_SSL_CA não definido");
+            fs.writeFileSync(process.env.CA_PATH, pem.replace(/\\n/g, "\n"), { mode: 0o600 });
+          '
+          chmod 600 "$CA_PATH"
+
+      - name: Provisionamento inicial (cria schema se ausente)
+        if: ${{ inputs.operation == 'provision-database' }}
+        working-directory: backend
+        env:
+          NODE_ENV: production
+          DB_HOST: ${{ secrets.PROD_DB_HOST }}
+          DB_PORT: ${{ secrets.PROD_DB_PORT }}
+          DB_USER: ${{ secrets.PROD_DB_USER }}
+          DB_PASSWORD: ${{ secrets.PROD_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.PROD_DB_NAME }}
+          DB_SSL: 'true'
+          DB_SSL_CA_PATH: ${{ runner.temp }}/tidb-ca.pem
+          DB_ALLOW_REMOTE: 'true'
+          DB_ALLOWED_HOST: ${{ secrets.PROD_DB_HOST }}
+          DB_ALLOW_PRODUCTION_MIGRATIONS: 'true'
+        run: npm run db:setup:prod -- --yes
+
+      - name: Migrations pendentes (antes de publicar o backend)
+        if: ${{ contains(fromJSON('["migrate-database","deploy-all"]'), inputs.operation) }}
+        working-directory: backend
+        env:
+          NODE_ENV: production
+          DB_HOST: ${{ secrets.PROD_DB_HOST }}
+          DB_PORT: ${{ secrets.PROD_DB_PORT }}
+          DB_USER: ${{ secrets.PROD_DB_USER }}
+          DB_PASSWORD: ${{ secrets.PROD_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.PROD_DB_NAME }}
+          DB_SSL: 'true'
+          DB_SSL_CA_PATH: ${{ runner.temp }}/tidb-ca.pem
+          DB_ALLOW_REMOTE: 'true'
+          DB_ALLOWED_HOST: ${{ secrets.PROD_DB_HOST }}
+          DB_ALLOW_PRODUCTION_MIGRATIONS: 'true'
+        run: npm run db:migrate
+
+      - name: Publica backend na Vercel
+        id: deploy-backend
+        if: ${{ contains(fromJSON('["deploy-backend","deploy-all"]'), inputs.operation) }}
+        # A Vercel CLI deve operar na raiz do monorepo; o projeto remoto seleciona backend/.
+        env:
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_BACKEND }}
+        run: |
+          npx --yes vercel@latest pull --yes --environment=production
+          npx --yes vercel@latest build --prod
+          url="$(npx --yes vercel@latest deploy --prebuilt --prod | tail -n 1)"
+          echo "URL do backend: $url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Instala dependências do frontend
+        if: ${{ contains(fromJSON('["deploy-frontend","deploy-all"]'), inputs.operation) }}
+        working-directory: frontend
+        run: npm ci
+
+      - name: Resolve URL do backend no rewrite do frontend
+        if: ${{ contains(fromJSON('["deploy-frontend","deploy-all"]'), inputs.operation) }}
+        working-directory: frontend
+        env:
+          BACKEND_URL: ${{ secrets.PROD_BACKEND_URL }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const raw = process.env.BACKEND_URL || "";
+            let url;
+            try {
+              url = new URL(raw);
+            } catch {
+              throw new Error("BACKEND_URL deve ser a URL HTTPS do backend já publicado");
+            }
+            if (url.protocol !== "https:") {
+              throw new Error("BACKEND_URL deve usar HTTPS");
+            }
+            const file = "vercel.json";
+            const content = fs.readFileSync(file, "utf8");
+            const placeholder = "__BACKEND_VERCEL_HOST__";
+            if (!content.includes(placeholder)) {
+              throw new Error("vercel.json não contém o placeholder do backend");
+            }
+            fs.writeFileSync(file, content.replaceAll(placeholder, url.host));
+          '
+
+      - name: Publica frontend na Vercel
+        if: ${{ contains(fromJSON('["deploy-frontend","deploy-all"]'), inputs.operation) }}
+        # A Vercel CLI deve operar na raiz do monorepo; o projeto remoto seleciona frontend/.
+        env:
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_FRONTEND }}
+          VITE_API_URL: /api
+        run: |
+          npx --yes vercel@latest pull --yes --environment=production
+          npx --yes vercel@latest build --prod
+          npx --yes vercel@latest deploy --prebuilt --prod

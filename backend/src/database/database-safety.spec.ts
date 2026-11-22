@@ -1,7 +1,10 @@
 import {
   assertDatabaseWriteAllowed,
   assertDestructiveDatabaseAction,
+  assertProductionSetupTarget,
   assertTestDatabaseTarget,
+  PRODUCTION_DB_HOST,
+  PRODUCTION_DB_SCHEMA,
   shouldRunMigrationsOnBootstrap,
   type DatabaseTarget,
 } from './database-safety';
@@ -56,6 +59,42 @@ describe('database safety', () => {
       expect(() =>
         assertTestDatabaseTarget({ ...authorized, allowedRemoteHost: 'outro.host' }),
       ).toThrow(/não confere/);
+    });
+  });
+
+  describe('production setup', () => {
+    const valid = (): DatabaseTarget => ({
+      host: PRODUCTION_DB_HOST,
+      schema: PRODUCTION_DB_SCHEMA,
+      nodeEnv: 'production',
+      allowRemote: true,
+      allowedRemoteHost: PRODUCTION_DB_HOST,
+      allowProductionMigrations: true,
+      sslEnabled: true,
+    });
+
+    it('accepts the exact authorized target with --yes', () => {
+      expect(() => assertProductionSetupTarget(valid(), '--yes')).not.toThrow();
+    });
+
+    it.each([
+      ['confirmation', {}, undefined],
+      ['wrong confirmation', {}, '--force'],
+      ['development', { nodeEnv: 'development' }, '--yes'],
+      ['wrong schema', { schema: 'outro_banco' }, '--yes'],
+      [
+        'wrong host',
+        { host: 'outro.gateway.com', allowedRemoteHost: 'outro.gateway.com' },
+        '--yes',
+      ],
+      ['TLS disabled', { sslEnabled: false }, '--yes'],
+      ['remote opt-in missing', { allowRemote: false }, '--yes'],
+      ['host not allowlisted', { allowedRemoteHost: '' }, '--yes'],
+      ['production migrations not authorized', { allowProductionMigrations: false }, '--yes'],
+    ])('rejects %s', (_label, overrides, confirmation) => {
+      expect(() =>
+        assertProductionSetupTarget({ ...valid(), ...overrides }, confirmation),
+      ).toThrow();
     });
   });
 
@@ -148,7 +187,7 @@ describe('database safety', () => {
       expect(shouldRunMigrationsOnBootstrap(testTarget({ schema: '' }))).toBe(false);
     });
 
-    it('does not run automatically on a remote host without opt-in', () => {
+    it('never runs automatically on a remote host, even with every opt-in', () => {
       const remote = testTarget({ host: 'db.exemplo.com', nodeEnv: 'development' });
 
       expect(shouldRunMigrationsOnBootstrap(remote)).toBe(false);
@@ -169,7 +208,7 @@ describe('database safety', () => {
           allowRemote: true,
           allowedRemoteHost: 'db.exemplo.com',
         }),
-      ).toBe(true);
+      ).toBe(false);
       expect(
         shouldRunMigrationsOnBootstrap({
           ...remote,

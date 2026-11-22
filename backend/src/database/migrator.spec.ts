@@ -91,4 +91,47 @@ describe('migration lock name', () => {
     expect(task).not.toHaveBeenCalled();
     expect(connection.end).toHaveBeenCalledTimes(1);
   });
+
+  it('reuses validated TLS options on the dedicated lock connection', async () => {
+    const ssl = {
+      ca: '-----BEGIN CERTIFICATE-----\nTESTE\n-----END CERTIFICATE-----',
+      rejectUnauthorized: true as const,
+      verifyIdentity: true as const,
+      minVersion: 'TLSv1.2' as const,
+    };
+    const sequelize = {
+      config: {
+        host: 'gateway.tidbcloud.com',
+        port: 4000,
+        username: 'root',
+        password: 'senha',
+        database: 'teste_receitas_rg_sistemas',
+        dialectOptions: { ssl },
+      },
+    } as never;
+    mockCreateConnection.mockResolvedValue(connectionReturning(1));
+
+    await withMigrationLock(sequelize, () => Promise.resolve('ok'));
+
+    expect(mockCreateConnection).toHaveBeenCalledWith(
+      expect.objectContaining({ host: 'gateway.tidbcloud.com', port: 4000, ssl }),
+    );
+  });
+
+  it('never opens a lock connection with certificate verification disabled', async () => {
+    const sequelize = {
+      config: {
+        host: 'gateway.tidbcloud.com',
+        database: 'teste_receitas_rg_sistemas',
+        dialectOptions: {
+          ssl: { ca: 'PEM', rejectUnauthorized: false, verifyIdentity: false },
+        },
+      },
+    } as never;
+
+    await expect(withMigrationLock(sequelize, () => Promise.resolve())).rejects.toThrow(
+      /rejectUnauthorized e verifyIdentity precisam ser true/,
+    );
+    expect(mockCreateConnection).not.toHaveBeenCalled();
+  });
 });

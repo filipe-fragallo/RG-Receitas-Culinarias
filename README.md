@@ -19,17 +19,18 @@ Aplicação Full Stack desenvolvida para o desafio técnico **RG Receitas Culin�
 | --- | --- |
 | Frontend | React, TypeScript, Vite e Tailwind CSS |
 | Backend | Node.js, NestJS, TypeScript e Sequelize |
-| Banco de dados | MySQL 8.4, migrations e seeders com Umzug |
-| Infraestrutura | Docker e Docker Compose |
+| Banco de dados | MySQL 8.4 (local), TiDB Cloud Starter (produção), migrations e seeders com Umzug |
+| Infraestrutura | Docker e Docker Compose (local), Vercel (produção) |
 | Testes | Jest, Supertest, Vitest e Playwright |
 
 ## Estrutura do repositório
 
 ```text
 .
-├── backend/   # API REST, banco, migrations, Docker e testes
-├── frontend/  # Interface React, testes e capturas de tela
-└── README.md  # Apresentação do projeto
+├── backend/    # API REST, banco, migrations, Docker e testes
+├── frontend/   # Interface React, testes e capturas de tela
+├── .github/    # workflow manual de produção
+└── README.md   # Apresentação do projeto
 ```
 
 Os projetos possuem configurações e documentação próprias:
@@ -53,6 +54,27 @@ Em seguida, siga as instruções do **[README do backend](backend/README.md)** p
 Também é possível executar a aplicação completa com Docker Compose, conforme documentado no backend.
 
 **Observação:** os arquivos `.env` contêm configurações locais e segredos; utilize os respectivos `.env.example` e não versione credenciais.
+
+## Produção
+
+A API e a SPA são projetos Vercel separados (Root Directory `backend/` e `frontend/`), usando TiDB
+Cloud Starter em modo TLS verificado. O provisionamento inicial é manual e idempotente:
+
+```bash
+cd backend
+npm run db:setup:prod -- --yes
+```
+
+O comando cria o schema apenas se ele não existir, aplica as migrations e o seeder pendentes e
+confere 4 migrations, 1 seeder e 13 categorias. Ele nunca executa `db:down`/`db:reset` e exige host,
+schema, TLS e confirmação explícitos. Em runtime, o backend não cria schema nem roda migrations.
+
+O deploy é feito pelo workflow manual **Produção (manual)** em `.github/workflows/production.yml`,
+com operações separadas para provisionar, migrar e publicar. Ele não dispara em `push` e exige
+confirmação na execução. Consulte os READMEs de
+[backend](backend/README.md#18-produção-vercel--tidb-cloud) e
+[frontend](frontend/README.md#20-deploy-na-vercel) para a lista de secrets, variáveis e o placeholder
+de rewrite que deve receber a URL real do backend após a criação do projeto.
 
 ---
 

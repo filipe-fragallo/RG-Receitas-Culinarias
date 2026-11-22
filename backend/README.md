@@ -27,7 +27,8 @@ MySQL 8.4 e Sequelize.
 15. [Segurança do banco e comandos destrutivos](#15-segurança-do-banco-e-comandos-destrutivos)
 16. [Problemas comuns](#16-problemas-comuns)
 17. [Limitações conhecidas](#17-limitações-conhecidas)
-18. [Auditoria de dependências](#18-auditoria-de-dependências)
+18. [Produção: Vercel + TiDB Cloud](#18-produção-vercel--tidb-cloud)
+19. [Auditoria de dependências](#19-auditoria-de-dependências)
 
 ---
 
@@ -215,6 +216,11 @@ Defina `PORT` no `backend/.env` e `VITE_PROXY_TARGET` no `frontend/.env` para us
 | `REGISTER_RATE_LIMIT_TTL_MS` | `3600000` | Janela de cadastro em milissegundos |
 | `CORS_ORIGIN` | `http://localhost:3000,http://localhost:5173,http://localhost:8080` | Origens explícitas; inclui o Swagger na API e `*` é recusado com cookies |
 | `DB_LOGGING` | `false` | Loga SQL quando `true` |
+| `DB_SSL` | `false` | `true` ativa TLS verificada (certificado **e** hostname); `false` preserva o MySQL local sem TLS |
+| `DB_SSL_CA` | vazio | PEM inline da CA no Vercel; um dos dois (`DB_SSL_CA` ou `DB_SSL_CA_PATH`) é obrigatório com TLS |
+| `DB_SSL_CA_PATH` | vazio | Caminho do PEM da CA fora do Vercel; obrigatório se `DB_SSL_CA` não for usado |
+| `DB_POOL_MAX` / `DB_POOL_MIN` | `10` / `0` | Tamanho do pool do Sequelize; use `1` no Vercel |
+| `DB_POOL_ACQUIRE_MS` / `DB_POOL_IDLE_MS` | `30000` / `10000` | Tempos de espera e ociosidade do pool |
 | `DB_MIGRATIONS_AUTO` | não definido | `false` desativa a automação local |
 | `DB_ALLOW_REMOTE` | `false` | Autoriza escrita em host remoto (ainda exige `DB_ALLOWED_HOST`) |
 | `DB_ALLOWED_HOST` | vazio | Host remoto nominalmente autorizado; obrigatório se `DB_ALLOW_REMOTE=true` |
@@ -231,6 +237,13 @@ apenas para depuração local e não é alcançável pela rede. Assim, um client
 remoto não consegue forjar `X-Forwarded-For` para burlar o rate limiting pela
 porta direta da API. O frontend/Nginx continua acessando `backend:3000` na rede
 interna, sem publicação adicional.
+
+`DB_SSL=true` exige `DB_SSL_CA` (PEM inline) ou `DB_SSL_CA_PATH` (arquivo PEM) e `DB_HOST` como
+hostname DNS — um IP é recusado porque não permite validar o certificado. As mesmas opções são
+usadas pelo Sequelize, pelo comando `db:check`, pela CLI e pela conexão `mysql2` dedicada ao
+`GET_LOCK`. Nunca é emitido
+`rejectUnauthorized: false`; no `mysql2` também é ativado `verifyIdentity: true` e TLS mínimo 1.2.
+Nenhuma senha é gravada em código ou documentação: forneça `DB_PASSWORD` somente no ambiente.
 
 ## 8. MySQL com Docker Compose
 
@@ -311,6 +324,7 @@ npm run db:migrate                 # reconcilia, aplica migrations e seeders pen
 npm run db:seed                    # exige migrations em dia e schema completo
 npm run db:status                  # relatório somente leitura
 npm run db:baseline -- --yes       # valida e registra tabelas equivalentes já existentes
+npm run db:setup:prod -- --yes     # provisionamento inicial de produção (idempotente)
 npm run db:down -- --yes           # reversão local (destrutivo)
 npm run db:reset -- --yes          # recria o schema local (destrutivo)
 ```
@@ -320,6 +334,52 @@ aplicados/pendentes, estado físico de cada tabela, inconsistências entre estru
 orientação de baseline/reparo. No perfil `full` do Compose, o serviço `migrate` executa o mesmo
 caminho de forma autorizada e idempotente antes de iniciar a API. `db:down` e `db:reset` exigem
 `--yes`, host local e schema conhecido do projeto. Nunca funcionam em produção.
+
+### 9.1. TiDB Cloud Starter (compatível com MySQL)
+
+Configure somente por variáveis de ambiente, por exemplo na seção `[Service]` do Render/Railway ou
+exportando no shell; nunca commite o `.env`:
+
+```bash
+export DB_HOST='gateway01.sa-east-1.prod.aws.tidbcloud.com'
+export DB_PORT=4000
+export DB_USER='<usuario>.root'
+export DB_NAME='teste_receitas_rg_sistemas'
+export DB_SSL=true
+export DB_SSL_CA_PATH='/etc/ssl/cert.pem'
+export DB_PASSWORD='<fornecida pelo ambiente>'
+```
+
+Teste a conexão antes de qualquer escrita:
+
+```bash
+npm run db:check
+```
+
+`db:check` é somente leitura: executa apenas `SELECT 1`, `VERSION()`, `DATABASE()` e
+`SHOW SESSION STATUS LIKE 'Ssl_cipher'`. Não roda migrations, seeders, DDL ou DML, não exige
+`DB_ALLOW_REMOTE`, omite credenciais na saída e falha se `DB_SSL=true` mas a sessão não negociou TLS.
+Use `db:status` para o relatório estrutural completo.
+
+O schema precisa existir antes de `db:status`/`db:migrate` (o TiDB Cloud não cria databases
+automaticamente). Use `npm run db:setup:prod -- --yes` para criá-lo e prepará-lo de uma vez; a
+aplicação em runtime nunca cria schema. Veja a [seção 18](#18-produção-vercel--tidb-cloud).
+
+**Nenhuma migration é aplicada automaticamente em host remoto**, mesmo com
+`DB_MIGRATIONS_AUTO=true` e `DB_ALLOW_REMOTE=true`. Para o TiDB Cloud, execute explicitamente, com
+autorização e após o `db:check`:
+
+```bash
+DB_ALLOW_REMOTE=true DB_ALLOWED_HOST='gateway01.sa-east-1.prod.aws.tidbcloud.com' npm run db:migrate
+DB_ALLOW_REMOTE=true DB_ALLOWED_HOST='gateway01.sa-east-1.prod.aws.tidbcloud.com' npm run db:seed
+```
+
+Compatibilidade verificada com TiDB 8.5: `utf8mb4_0900_ai_ci` (padrão e explícito), InnoDB,
+`GET_LOCK`/`RELEASE_LOCK`, índices únicos e FKs com `ON DELETE/UPDATE CASCADE`. As quatro migrations
+e o seeder das 13 categorias aplicam sem inconsistências. A `004-create-auth-sessions` declara a FK
+com nome explícito **após** a criação do índice de `user_id`: o TiDB nomeia FKs inline como `fk_1` e
+cria um índice extra, enquanto o MySQL usa `auth_sessions_ibfk_1`. O schema final produzido é
+idêntico nos dois bancos; nenhuma tabela ou coluna original foi alterada para contornar a diferença.
 
 ## 10. Inicialização do backend
 
@@ -464,10 +524,13 @@ npm run build         # nest build → dist/
 | Situação | Comportamento |
 | --- | --- |
 | Bootstrap em produção | Nenhuma migration/seeder automático |
-| Bootstrap em host remoto sem autorização explícita e nominal | Nenhuma migration/seeder automático |
+| Bootstrap em qualquer host remoto (inclui TiDB Cloud) | Nenhuma migration/seeder automático, mesmo com todos os opt-ins |
+| `npm run db:check` | Somente `SELECT`/`SHOW STATUS`; nunca escreve, mesmo em host remoto |
 | Bootstrap com schema desconhecido | Nenhuma migration/seeder automático |
 | `DB_ALLOW_REMOTE=true` sem `DB_ALLOWED_HOST` conferindo | Escrita remota recusada |
 | `npm run db:migrate` em produção sem `DB_ALLOW_PRODUCTION_MIGRATIONS=true` | Recusado |
+| `db:setup:prod` sem `--yes`, com outro host/schema ou sem TLS | Recusado antes de conectar |
+| `db:setup:prod` repetido | Preserva dados; aplica só pendências e valida 4/1/13 |
 | `db:baseline` sem `--yes` | Recusado |
 | `db:down` / `db:reset` sem `--yes` | Recusado |
 | `db:down` / `db:reset` em produção ou host remoto | Recusado sem exceção |
@@ -484,6 +547,10 @@ destrutiva altera o banco antes dessas verificações.
 | `EADDRINUSE` na 3000 | Outro processo já escuta na porta local | A API aborta antes do bootstrap; use `lsof -nP -iTCP:3000 -sTCP:LISTEN`, encerre manualmente ou defina `PORT` e ajuste `VITE_PROXY_TARGET`. O container publica `3001` por padrão |
 | `ECONNREFUSED 127.0.0.1:3306` | MySQL não iniciou | `docker compose up -d` e aguarde o healthcheck |
 | `Access denied for user` | Credenciais divergentes | Confira `DB_USER`/`DB_PASSWORD` |
+| `DB_SSL=true exige DB_SSL_CA_PATH...` | TLS ativo sem CA informada | Informe o PEM da autoridade em `DB_SSL_CA_PATH` |
+| `DB_SSL=true exige DB_HOST como hostname DNS` | IP usado como host | Use o gateway DNS do TiDB Cloud para validar o certificado |
+| `Falha ao ler DB_SSL_CA_PATH` / `CA inválida` | Arquivo ausente ou PEM corrompido | Confira o caminho e o conteúdo do certificado |
+| `a sessão não negociou TLS` | Gateway/porta ou CA incorretos | Rode `npm run db:check`; confira `DB_PORT=4000` e `DB_SSL_CA_PATH` |
 | `Unknown database` | Schema ainda não existe | Suba o MySQL e rode `npm run db:migrate` |
 | `Duplicate key name 'login_UNIQUE'` ou `Table already exists` | Tabela criada pelo SQL original sem registro no `SequelizeMeta` | `npm run db:status`; a reconciliação compara a estrutura antes de registrar. Não use `db:reset` em dados existentes |
 | `divergência não reparável` | Índice/FK/coluna com definição diferente da migration | Corrija manualmente e repita `npm run db:status`; nada foi gravado no histórico |
@@ -513,7 +580,85 @@ destrutiva altera o banco antes dessas verificações.
 - **Tabelas de controle** `SequelizeMeta`/`SequelizeData` são metadados; as tabelas de negócio
   permanecem equivalentes ao schema original.
 
-## 18. Auditoria de dependências
+## 18. Produção: Vercel + TiDB Cloud
+
+O backend é publicado como projeto Vercel independente com **Root Directory = `backend/`**. O Vercel
+detecta `src/main.ts` como entrypoint NestJS; nenhum `api/` adicional é necessário. No runtime de
+Functions (`VERCEL=1`) o bootstrap **não** faz checagem de porta, não chama `app.listen()` e não
+aplica migrations. Ele apenas inicializa o mesmo pipeline HTTP usado localmente. Em ambiente local,
+`npm run dev`, a checagem de porta e as migrations automáticas continuam exatamente como antes.
+
+### 18.1. Variáveis do projeto Vercel
+
+Configure no projeto Vercel (Production), nunca no repositório:
+
+| Variável | Valor de produção |
+| --- | --- |
+| `NODE_ENV` | `production` |
+| `DB_HOST` | `gateway01.sa-east-1.prod.aws.tidbcloud.com` |
+| `DB_PORT` | `4000` |
+| `DB_USER` | usuário `.root` fornecido pelo TiDB Cloud |
+| `DB_PASSWORD` | somente como secret |
+| `DB_NAME` | `teste_receitas_rg_sistemas` |
+| `DB_SSL` | `true` |
+| `DB_SSL_CA` | conteúdo PEM da CA; aceita quebras reais ou `\n` literais |
+| `DB_POOL_MAX` | `1` (evita esgotar conexões com múltiplas Functions frias) |
+| `JWT_SECRET` | gerado com `openssl rand -hex 32`, somente como secret |
+| `COOKIE_SECURE` | `true` |
+| `CORS_ORIGIN` | origem HTTPS exata do frontend |
+| `TRUST_PROXY` | `true` |
+| `TRUST_PROXY_HOPS` | `1` |
+
+`DB_SSL_CA_PATH` não é usado no Vercel: o PEM inline `DB_SSL_CA` evita depender de arquivos como
+`/etc/ssl/cert.pem`. O hostname continua sendo validado (`verifyIdentity=true`) e não existe opção
+de `rejectUnauthorized:false`. O pool mantém os padrões locais (`10/0/30000/10000`) quando as
+variáveis `DB_POOL_*` não são definidas.
+
+### 18.2. Provisionamento inicial
+
+O schema ainda não existia no TiDB Cloud. Crie-o de forma explícita e autorizada:
+
+```bash
+npm run db:setup:prod -- --yes
+```
+
+Antes de conectar, o comando exige `NODE_ENV=production`, `DB_SSL=true`, `DB_HOST` exatamente
+`gateway01.sa-east-1.prod.aws.tidbcloud.com`, `DB_NAME` exatamente
+`teste_receitas_rg_sistemas`, `DB_ALLOW_REMOTE=true` com `DB_ALLOWED_HOST` conferindo,
+`DB_ALLOW_PRODUCTION_MIGRATIONS=true` e o argumento `--yes`. Qualquer outro argumento — inclusive
+`--reset`/`--force` — é recusado. O único DDL de criação é
+`CREATE DATABASE IF NOT EXISTS ... CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`; um schema
+existente é preservado.
+
+Depois disso o comando reutiliza o Umzug existente (`runMigrationsAndSeeders`), aplica apenas o que
+está pendente e valida o resultado: 4 migrations registradas, 1 seeder registrado, 13 categorias e
+zero inconsistências. Repetições são seguras e não apagam usuários, receitas nem categorias.
+
+### 18.3. CI/CD manual
+
+`.github/workflows/production.yml` só é acionado por `workflow_dispatch` e exige a caixa de
+confirmação. Ações disponíveis:
+
+- `provision-database`: executa apenas `db:setup:prod -- --yes`;
+- `migrate-database`: executa apenas `db:migrate` (etapa separada, antes de publicar);
+- `deploy-backend`: publica somente a API;
+- `deploy-frontend`: publica somente a SPA;
+- `deploy-all`: migrations → backend → frontend. Nunca inclui provisionamento.
+
+Secrets usados pelo provisionamento/migrations:
+`PROD_DB_HOST`, `PROD_DB_PORT`, `PROD_DB_USER`, `PROD_DB_PASSWORD`, `PROD_DB_NAME` e
+`PROD_DB_SSL_CA`. O CA é gravado apenas em arquivo temporário do runner com permissão `600`.
+Nenhum valor é impresso ou versionado. `JWT_SECRET` e `CORS_ORIGIN` não são consumidos pelo
+workflow: devem ser configurados como variáveis de ambiente de Production no projeto Vercel do
+backend, nunca no repositório.
+
+Secrets de publicação: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID_BACKEND`,
+`VERCEL_PROJECT_ID_FRONTEND` e `PROD_BACKEND_URL` (para rewrites do frontend). Em `deploy-all`, a
+URL retornada pelo deploy do backend é reutilizada automaticamente; em `deploy-frontend` isolado,
+`PROD_BACKEND_URL` precisa estar preenchida. Nenhuma alteração no frontend provisiona ou migra o
+banco.
+
+## 19. Auditoria de dependências
 
 `npm audit` e `npm audit --omit=dev` terminam com **0 vulnerabilidades** no backend. O frontend
 também está em 0 nos dois modos. Nenhuma auditoria foi desativada e `npm audit fix --force` não foi

@@ -26,9 +26,6 @@ export async function up({ context }: { context: QueryInterface }): Promise<void
       user_id: {
         type: DataTypes.INTEGER.UNSIGNED,
         allowNull: false,
-        references: { model: 'usuarios', key: 'id' },
-        onDelete: 'CASCADE',
-        onUpdate: 'CASCADE',
       },
       token_identifier_hash: {
         type: DataTypes.STRING(64),
@@ -60,6 +57,18 @@ export async function up({ context }: { context: QueryInterface }): Promise<void
   });
   await context.addIndex('auth_sessions', ['user_id'], { name: 'idx_auth_sessions_user_id' });
   await context.addIndex('auth_sessions', ['expires_at'], { name: 'idx_auth_sessions_expires_at' });
+
+  // A FK é adicionada depois do índice e com nome explícito. Assim MySQL 8.4 e
+  // TiDB produzem exatamente o mesmo schema (o TiDB nomeia uma FK inline como
+  // `fk_1` e cria um índice extra). O schema final não é alterado.
+  await context.addConstraint('auth_sessions', {
+    type: 'foreign key',
+    name: 'auth_sessions_ibfk_1',
+    fields: ['user_id'],
+    references: { table: 'usuarios', field: 'id' },
+    onDelete: 'CASCADE',
+    onUpdate: 'CASCADE',
+  });
 }
 
 export async function down({ context }: { context: QueryInterface }): Promise<void> {

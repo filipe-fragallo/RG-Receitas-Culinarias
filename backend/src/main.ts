@@ -1,3 +1,5 @@
+import type { IncomingMessage, ServerResponse } from 'node:http';
+
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
@@ -7,16 +9,22 @@ import { Sequelize } from 'sequelize-typescript';
 import { AppModule } from './app.module';
 import { configureApp } from './app.setup';
 import { PortInUseError, assertPortAvailable } from './config/port-preflight';
+import { isVercelRuntime } from './config/runtime';
 import { setupSwagger } from './config/swagger';
 import { shouldRunMigrationsOnBootstrap } from './database/database-safety';
 import { runMigrationsAndSeeders } from './database/migrator';
 
 // A pré-verificação de porta precisa ler .env antes de NestFactory carregar o
-// ConfigModule. A ordem de precedência é a mesma usada pelo AppModule.
-loadEnv({ path: '.env.local' });
-loadEnv({ path: '.env' });
+// ConfigModule. Em Functions não há arquivos .env nem porta: evita-se até o
+// aviso do dotenv. A ordem de precedência local é a mesma usada pelo AppModule.
+if (!isVercelRuntime()) {
+  loadEnv({ path: '.env.local' });
+  loadEnv({ path: '.env' });
+}
 
 const logger = new Logger('Bootstrap');
+
+type RequestListener = (req: IncomingMessage, res: ServerResponse) => void;
 
 function requestedPort(): number {
   return Number(process.env.PORT ?? '3000');
@@ -83,14 +91,53 @@ async function bootstrap(): Promise<void> {
   logger.log(`Swagger disponível em http://localhost:${port}/api/docs`);
 }
 
-void bootstrap().catch((error: unknown) => {
-  if (error instanceof PortInUseError) {
-    logger.error(error.message);
-  } else {
-    logger.error(
-      'Falha na inicialização da API.',
-      error instanceof Error ? error.stack : String(error),
-    );
+/**
+ * No serverless a aplicação é inicializada uma vez por instância da Function,
+ * sem `listen`, sem checagem de porta e sem migrations. O schema é
+ * responsabilidade de `db:setup:prod`/`db:migrate` na etapa de deploy.
+ */
+let serverlessApp: Promise<RequestListener> | undefined;
+
+async function getServerlessApp(): Promise<RequestListener> {
+  if (!serverlessApp) {
+    serverlessApp = (async () => {
+      const app = await NestFactory.create(AppModule);
+      configureApp(app);
+      setupSwagger(app);
+      await app.init();
+      return app.getHttpAdapter().getInstance() as RequestListener;
+    })().catch((error: unknown) => {
+      serverlessApp = undefined;
+      throw error;
+    });
   }
-  process.exit(1);
-});
+  return serverlessApp;
+}
+
+const vercelHandler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  const listener = await getServerlessApp();
+  listener(req, res);
+};
+
+export default vercelHandler;
+
+// O @vercel/node aceita `module.exports` CommonJS ou `.default`. Definir os
+// dois preserva compatibilidade sem alterar o bootstrap local.
+if (require.main !== module) {
+  Object.assign(vercelHandler, { default: vercelHandler });
+  module.exports = vercelHandler;
+}
+
+if (!isVercelRuntime()) {
+  void bootstrap().catch((error: unknown) => {
+    if (error instanceof PortInUseError) {
+      logger.error(error.message);
+    } else {
+      logger.error(
+        'Falha na inicialização da API.',
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+    process.exit(1);
+  });
+}

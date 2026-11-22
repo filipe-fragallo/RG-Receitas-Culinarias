@@ -95,4 +95,78 @@ describe('envValidationSchema', () => {
 
     expect(error?.message).toContain('CORS_ORIGIN');
   });
+
+  it('defaults DB_SSL to false and keeps the local database unchanged', () => {
+    const result = envValidationSchema.validate({
+      ...baseEnv,
+      JWT_SECRET: 'a'.repeat(64),
+    });
+    const value = result.value as { DB_SSL: boolean; DB_SSL_CA_PATH: string };
+
+    expect(result.error).toBeUndefined();
+    expect(value.DB_SSL).toBe(false);
+    expect(value.DB_SSL_CA_PATH).toBe('');
+  });
+
+  it('requires an explicit CA path when DB_SSL is true', () => {
+    const { error } = envValidationSchema.validate({
+      ...baseEnv,
+      DB_HOST: 'gateway.tidbcloud.com',
+      DB_SSL: true,
+      JWT_SECRET: 'a'.repeat(64),
+    });
+
+    expect(error?.message).toContain('DB_SSL_CA_PATH');
+  });
+
+  it('rejects an IP host when DB_SSL is true because hostname cannot be verified', () => {
+    const { error } = envValidationSchema.validate({
+      ...baseEnv,
+      DB_SSL: true,
+      DB_SSL_CA_PATH: '/etc/ssl/cert.pem',
+      JWT_SECRET: 'a'.repeat(64),
+    });
+
+    expect(error?.message).toContain('DB_HOST');
+  });
+
+  it('accepts the TiDB Cloud gateway hostname with DB_SSL and a CA path', () => {
+    const { error } = envValidationSchema.validate({
+      ...baseEnv,
+      DB_HOST: 'gateway01.sa-east-1.prod.aws.tidbcloud.com',
+      DB_PORT: 4000,
+      DB_SSL: true,
+      DB_SSL_CA_PATH: '/etc/ssl/cert.pem',
+      JWT_SECRET: 'a'.repeat(64),
+    });
+
+    expect(error).toBeUndefined();
+  });
+
+  it('accepts an inline CA instead of a filesystem path for Vercel', () => {
+    const result = envValidationSchema.validate({
+      ...baseEnv,
+      DB_HOST: 'gateway01.sa-east-1.prod.aws.tidbcloud.com',
+      DB_PORT: 4000,
+      DB_SSL: true,
+      DB_SSL_CA: '-----BEGIN CERTIFICATE-----\nTESTE\n-----END CERTIFICATE-----',
+      JWT_SECRET: 'a'.repeat(64),
+    });
+
+    expect(result.error).toBeUndefined();
+    expect((result.value as { DB_SSL_CA_PATH: string }).DB_SSL_CA_PATH).toBe('');
+  });
+
+  it('defaults the pool to the local values', () => {
+    const result = envValidationSchema.validate({
+      ...baseEnv,
+      JWT_SECRET: 'a'.repeat(64),
+    });
+    const value = result.value as Record<string, number>;
+
+    expect(value.DB_POOL_MAX).toBe(10);
+    expect(value.DB_POOL_MIN).toBe(0);
+    expect(value.DB_POOL_ACQUIRE_MS).toBe(30_000);
+    expect(value.DB_POOL_IDLE_MS).toBe(10_000);
+  });
 });

@@ -1,5 +1,11 @@
 import * as Joi from 'joi';
 
+import {
+  assertDatabaseSslHost,
+  DB_SSL_CA_REQUIRED_MESSAGE,
+  DB_SSL_HOST_MESSAGE,
+} from './database-ssl';
+
 const KNOWN_INSECURE_JWT_SECRETS = [
   'troque-este-segredo-por-uma-string-aleatoria-com-32-caracteres',
   'troque-este-segredo-por-uma-string-aleatoria-com-32-caracteres-ou-mais',
@@ -21,6 +27,10 @@ function isLoopbackOrigin(origin: string): boolean {
   }
 }
 
+function trimmedString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   PORT: Joi.number().port().min(1).default(3000),
@@ -31,6 +41,20 @@ export const envValidationSchema = Joi.object({
   DB_PASSWORD: Joi.string().allow('').required(),
   DB_NAME: Joi.string().required(),
   DB_LOGGING: Joi.boolean().default(false),
+  // Pool configurável: em Functions use DB_POOL_MAX=1 para não esgotar conexões
+  // quando várias instâncias frias iniciam ao mesmo tempo.
+  DB_POOL_MAX: Joi.number().integer().min(1).max(100).default(10),
+  DB_POOL_MIN: Joi.number().integer().min(0).max(100).default(0),
+  DB_POOL_ACQUIRE_MS: Joi.number().integer().min(1000).default(30_000),
+  DB_POOL_IDLE_MS: Joi.number().integer().min(0).default(10_000),
+
+  // TLS é desligado por padrão para preservar o MySQL 8.4 local. Quando ligado,
+  // exige CA explícita e um hostname DNS (validado abaixo); nunca IP.
+  DB_SSL: Joi.boolean().default(false),
+  // DB_SSL_CA é o PEM inline usado no Vercel; DB_SSL_CA_PATH continua disponível
+  // para desenvolvimento/CI com arquivo. Um dos dois é obrigatório com TLS.
+  DB_SSL_CA: Joi.string().trim().allow('').default(''),
+  DB_SSL_CA_PATH: Joi.string().trim().allow('').default(''),
 
   // Controles explícitos de segurança. Por padrão: sem migrações automáticas
   // em produção/host remoto e sem autorização de operações destrutivas.
@@ -96,4 +120,27 @@ export const envValidationSchema = Joi.object({
       return value;
     })
     .messages({ 'any.invalid': CORS_MESSAGE }),
-}).unknown(true);
+})
+  .custom((value: Record<string, unknown>, helpers: Joi.CustomHelpers) => {
+    if (value['DB_SSL'] === true) {
+      const inlineCa = trimmedString(value['DB_SSL_CA']);
+      const caPath = trimmedString(value['DB_SSL_CA_PATH']);
+      if (!inlineCa && !caPath) {
+        return helpers.error('dbSsl.caRequired');
+      }
+
+      if (typeof value['DB_HOST'] === 'string') {
+        try {
+          assertDatabaseSslHost(value['DB_HOST']);
+        } catch {
+          return helpers.error('dbSsl.hostInvalid');
+        }
+      }
+    }
+    return value;
+  })
+  .messages({
+    'dbSsl.caRequired': DB_SSL_CA_REQUIRED_MESSAGE,
+    'dbSsl.hostInvalid': DB_SSL_HOST_MESSAGE,
+  })
+  .unknown(true);
