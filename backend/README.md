@@ -6,7 +6,7 @@ MySQL 8.4 e Sequelize.
 
 > Este projeto é independente do frontend: possui `package.json`, lockfile, `.env.example`,
 > `.gitignore`, `.dockerignore`, `Dockerfile`, `docker-compose.yml` e este README. O frontend React
-> está em `../frontend`. A raiz do repositório contém apenas `backend/`, `frontend/` e `.git/`.
+> está em `../frontend`. A raiz do monorepositório contém também `.github/` e o `README.md` geral.
 
 ## Sumário
 
@@ -544,6 +544,7 @@ destrutiva altera o banco antes dessas verificações.
 
 | Sintoma | Causa provável | Solução |
 | --- | --- | --- |
+| `Please install mysql2 package manually` no Vercel | Driver dinâmico ausente do bundle serverless | Confirme `mysql2` em `dependencies` e `dialectModule: mysql2` em `src/database/sequelize-options.ts`; gere novo deploy |
 | `EADDRINUSE` na 3000 | Outro processo já escuta na porta local | A API aborta antes do bootstrap; use `lsof -nP -iTCP:3000 -sTCP:LISTEN`, encerre manualmente ou defina `PORT` e ajuste `VITE_PROXY_TARGET`. O container publica `3001` por padrão |
 | `ECONNREFUSED 127.0.0.1:3306` | MySQL não iniciou | `docker compose up -d` e aguarde o healthcheck |
 | `Access denied for user` | Credenciais divergentes | Confira `DB_USER`/`DB_PASSWORD` |
@@ -582,81 +583,127 @@ destrutiva altera o banco antes dessas verificações.
 
 ## 18. Produção: Vercel + TiDB Cloud
 
-O backend é publicado como projeto Vercel independente com **Root Directory = `backend/`**. O Vercel
-detecta `src/main.ts` como entrypoint NestJS; nenhum `api/` adicional é necessário. No runtime de
-Functions (`VERCEL=1`) o bootstrap **não** faz checagem de porta, não chama `app.listen()` e não
-aplica migrations. Ele apenas inicializa o mesmo pipeline HTTP usado localmente. Em ambiente local,
-`npm run dev`, a checagem de porta e as migrations automáticas continuam exatamente como antes.
+**Ambiente publicado:**
 
-### 18.1. Variáveis do projeto Vercel
+| Componente | Endereço / configuração |
+| --- | --- |
+| API NestJS | [rg-receitas-culinarias.vercel.app](https://rg-receitas-culinarias.vercel.app) |
+| Healthcheck | [GET /api/health](https://rg-receitas-culinarias.vercel.app/api/health) |
+| Swagger | [Documentação interativa](https://rg-receitas-culinarias.vercel.app/api/docs) |
+| Frontend | [Meu Caderno de Receitas](https://rg-receitas-culinarias-oai3.vercel.app/login) |
+| Banco | TiDB Cloud Starter, schema `teste_receitas_rg_sistemas` |
 
-Configure no projeto Vercel (Production), nunca no repositório:
+O backend é publicado em um projeto Vercel com **Root Directory = `backend/`** e
+framework NestJS. O entrypoint é `src/main.ts`. Em Functions (`VERCEL=1`),
+o bootstrap não chama `app.listen()`, não verifica a porta local e **não executa
+migrations/seeders**. A aplicação reutiliza o mesmo pipeline HTTP dos testes e
+do desenvolvimento.
 
-| Variável | Valor de produção |
+### 18.1. Variáveis de ambiente da API
+
+Configure no projeto **Vercel → Settings → Environment Variables → Production**.
+Não envie um arquivo `.env` com credenciais para o GitHub.
+
+| Variável | Valor / orientação |
 | --- | --- |
 | `NODE_ENV` | `production` |
 | `DB_HOST` | `gateway01.sa-east-1.prod.aws.tidbcloud.com` |
 | `DB_PORT` | `4000` |
-| `DB_USER` | usuário `.root` fornecido pelo TiDB Cloud |
-| `DB_PASSWORD` | somente como secret |
 | `DB_NAME` | `teste_receitas_rg_sistemas` |
+| `DB_USER` | usuário fornecido pelo TiDB Cloud |
+| `DB_PASSWORD` | senha privada, configurada somente no ambiente |
 | `DB_SSL` | `true` |
-| `DB_SSL_CA` | conteúdo PEM da CA; aceita quebras reais ou `\n` literais |
-| `DB_POOL_MAX` | `1` (evita esgotar conexões com múltiplas Functions frias) |
-| `JWT_SECRET` | gerado com `openssl rand -hex 32`, somente como secret |
-| `COOKIE_SECURE` | `true` |
-| `CORS_ORIGIN` | origem HTTPS exata do frontend |
-| `TRUST_PROXY` | `true` |
-| `TRUST_PROXY_HOPS` | `1` |
+| `DB_SSL_CA` | PEM completo da CA confiável (ISRG Root X1), com quebras de linha |
+| `DB_POOL_MAX` / `DB_POOL_MIN` | `1` / `0` |
+| `DB_MIGRATIONS_AUTO` | `false` |
+| `DB_ALLOW_REMOTE` | `false` no runtime (autorizações de migração são separadas) |
+| `DB_ALLOW_PRODUCTION_MIGRATIONS` | `false` no runtime |
+| `JWT_SECRET` | segredo novo de no mínimo 32 caracteres; gere com `openssl rand -hex 32` |
+| `JWT_EXPIRES_IN_SECONDS` | `3600` |
+| `COOKIE_SECURE` / `COOKIE_SAME_SITE` | `true` / `lax` |
+| `CORS_ORIGIN` | `https://rg-receitas-culinarias-oai3.vercel.app` |
+| `TRUST_PROXY` / `TRUST_PROXY_HOPS` | `true` / `1` |
 
-`DB_SSL_CA_PATH` não é usado no Vercel: o PEM inline `DB_SSL_CA` evita depender de arquivos como
-`/etc/ssl/cert.pem`. O hostname continua sendo validado (`verifyIdentity=true`) e não existe opção
-de `rejectUnauthorized:false`. O pool mantém os padrões locais (`10/0/30000/10000`) quando as
-variáveis `DB_POOL_*` não são definidas.
+As variáveis de rate limiting (`LOGIN_RATE_LIMIT_*`, `REGISTER_RATE_LIMIT_*`)
+continuam configuráveis. `DB_SSL_CA_PATH=/etc/ssl/cert.pem` é usado apenas
+quando existe esse arquivo no host local; no Vercel, use o PEM inline em
+`DB_SSL_CA`. A conexão verifica a cadeia e o hostname do certificado;
+não desative `rejectUnauthorized`.
 
-### 18.2. Provisionamento inicial
+O pacote `mysql2` é dependência de produção. Em
+`src/database/sequelize-options.ts`, o driver é informado explicitamente
+ao Sequelize com `dialectModule: mysql2` para compatibilidade com o bundle
+serverless da Vercel.
 
-O schema ainda não existia no TiDB Cloud. Crie-o de forma explícita e autorizada:
+### 18.2. Schema, migrations e seeders
+
+O provisionamento inicial **já foi concluído** no TiDB Cloud e validado:
+
+| Verificação | Resultado |
+| --- | --- |
+| Migrations aplicadas | 4 |
+| Migrations pendentes | 0 |
+| Seeders aplicados | 1 |
+| Seeders pendentes | 0 |
+| Categorias | 13 |
+| Inconsistências | 0 |
+
+O schema é `teste_receitas_rg_sistemas` (não o schema de sistema `sys`).
+Sua criação utiliza `utf8mb4` e collation `utf8mb4_0900_ai_ci`.
+
+Para **um ambiente de produção ainda não provisionado**, após configurar
+as credenciais, `NODE_ENV=production`, TLS verificado e o nome do schema,
+execute explicitamente no diretório `backend/`:
 
 ```bash
+DB_ALLOW_REMOTE=true \
+DB_ALLOWED_HOST=gateway01.sa-east-1.prod.aws.tidbcloud.com \
+DB_ALLOW_PRODUCTION_MIGRATIONS=true \
 npm run db:setup:prod -- --yes
 ```
 
-Antes de conectar, o comando exige `NODE_ENV=production`, `DB_SSL=true`, `DB_HOST` exatamente
-`gateway01.sa-east-1.prod.aws.tidbcloud.com`, `DB_NAME` exatamente
-`teste_receitas_rg_sistemas`, `DB_ALLOW_REMOTE=true` com `DB_ALLOWED_HOST` conferindo,
-`DB_ALLOW_PRODUCTION_MIGRATIONS=true` e o argumento `--yes`. Qualquer outro argumento — inclusive
-`--reset`/`--force` — é recusado. O único DDL de criação é
-`CREATE DATABASE IF NOT EXISTS ... CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`; um schema
-existente é preservado.
+Esse comando é idempotente, cria o schema apenas se ausente, executa
+pendências via Umzug e verifica o resultado. Ele não executa
+`db:down` nem `db:reset`. Para conferir um banco já preparado sem alterar
+dados, use:
 
-Depois disso o comando reutiliza o Umzug existente (`runMigrationsAndSeeders`), aplica apenas o que
-está pendente e valida o resultado: 4 migrations registradas, 1 seeder registrado, 13 categorias e
-zero inconsistências. Repetições são seguras e não apagam usuários, receitas nem categorias.
+```bash
+npm run db:check
+npm run db:status
+```
 
-### 18.3. CI/CD manual
+Qualquer nova migration deve ser aplicada **explicitamente**, com as
+autorizações necessárias e antes do deploy da API correspondente.
+Nunca execute as suítes de teste de banco contra o schema de produção.
 
-`.github/workflows/production.yml` só é acionado por `workflow_dispatch` e exige a caixa de
-confirmação. Ações disponíveis:
+### 18.3. Publicação dos projetos Vercel
 
-- `provision-database`: executa apenas `db:setup:prod -- --yes`;
-- `migrate-database`: executa apenas `db:migrate` (etapa separada, antes de publicar);
-- `deploy-backend`: publica somente a API;
-- `deploy-frontend`: publica somente a SPA;
-- `deploy-all`: migrations → backend → frontend. Nunca inclui provisionamento.
+O projeto do backend e o projeto do frontend foram importados do mesmo
+repositório GitHub, cada um com seu próprio diretório raiz. As publicações
+atuais usam a **integração GitHub–Vercel** (branch `main`), e as variáveis
+de ambiente ficam nos respectivos projetos Vercel.
 
-Secrets usados pelo provisionamento/migrations:
-`PROD_DB_HOST`, `PROD_DB_PORT`, `PROD_DB_USER`, `PROD_DB_PASSWORD`, `PROD_DB_NAME` e
-`PROD_DB_SSL_CA`. O CA é gravado apenas em arquivo temporário do runner com permissão `600`.
-Nenhum valor é impresso ou versionado. `JWT_SECRET` e `CORS_ORIGIN` não são consumidos pelo
-workflow: devem ser configurados como variáveis de ambiente de Production no projeto Vercel do
-backend, nunca no repositório.
+O frontend faz requisições relativas para `/api`; `frontend/vercel.json`
+encaminha esse caminho para `https://rg-receitas-culinarias.vercel.app`.
+O proxy mantém os cookies `HttpOnly` no host da SPA. A origem HTTPS do
+frontend deve permanecer autorizada pelo backend em `CORS_ORIGIN`.
 
-Secrets de publicação: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID_BACKEND`,
-`VERCEL_PROJECT_ID_FRONTEND` e `PROD_BACKEND_URL` (para rewrites do frontend). Em `deploy-all`, a
-URL retornada pelo deploy do backend é reutilizada automaticamente; em `deploy-frontend` isolado,
-`PROD_BACKEND_URL` precisa estar preenchida. Nenhuma alteração no frontend provisiona ou migra o
-banco.
+### 18.4. Workflow manual legado
+
+O arquivo `.github/workflows/production.yml` oferece operações
+`provision-database`, `migrate-database`, `deploy-backend`,
+`deploy-frontend` e `deploy-all`, com confirmação explícita.
+
+**Atenção:** o passo `deploy-frontend` desse workflow ainda espera o antigo
+placeholder `__BACKEND_VERCEL_HOST__`, enquanto `frontend/vercel.json`
+já contém o endereço real da API. Portanto, **não execute
+`deploy-frontend` ou `deploy-all` pelo workflow sem primeiro atualizar
+esse passo**. A publicação atual do frontend é realizada pela integração
+GitHub–Vercel, não por esse workflow.
+
+As operações de banco exigem segredos próprios no GitHub Actions, host
+autorizado e permissões explícitas. Nenhuma publicação comum da API ou SPA
+deve executar provisionamento automaticamente.
 
 ## 19. Auditoria de dependências
 

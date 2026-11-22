@@ -4,8 +4,7 @@ Aplicação React do desafio **RG Receitas Culinárias**: caderno pessoal com au
 receitas, pesquisa, filtros, paginação, responsividade e impressão A4.
 
 > Projeto independente: `package.json`, lockfile, `.env.example`, `.gitignore`, `.dockerignore`,
-> `Dockerfile`, `nginx.conf` e este README. A API NestJS está em `../backend`. A raiz do repositório
-> contém apenas `backend/`, `frontend/` e `.git/`.
+> `Dockerfile`, `nginx.conf` e este README. A API NestJS está em `../backend`. A raiz do monorepositório também contém `.github/` e o README geral.
 
 ![Lista de receitas](screenshots/02-recipe-list.png)
 
@@ -109,9 +108,7 @@ frontend/
    `errors`; o corpo de erro é validado antes do uso.
 4. **Sessão em cookie HttpOnly.** O navegador nunca lê nem guarda o JWT; o client envia
    `credentials: 'include'` e o token CSRF recebido no JSON no header `X-CSRF-Token`.
-5. **Proxy em vez de CORS no navegador.** O Vite encaminha `/api` para `VITE_PROXY_TARGET`; no
-   Docker, o Nginx encaminha para `backend:3000`. O published host port do backend não é usado pelo
-   frontend em container.
+5. **Proxy para manter a sessão no mesmo host.** O Vite encaminha `/api` para `VITE_PROXY_TARGET` em desenvolvimento; no Docker, o Nginx encaminha para `backend:3000`; na Vercel, os rewrites de `vercel.json` encaminham para a API pública. O navegador continua chamando `/api` no próprio host.
 6. **Restauração silenciosa.** Um 401 em `/auth/me` resulta em estado anônimo sem toast de
    "sessão expirada"; o aviso global fica para requisições autenticadas em uso.
 7. **Submissões protegidas.** Login, cadastro, criação/edição e exclusão possuem trava de envio
@@ -142,7 +139,7 @@ cp .env.example .env
 | Variável | Padrão | Descrição |
 | --- | --- | --- |
 | `VITE_API_URL` | `/api` | Base usada pelo navegador (proxy do Vite/Nginx). Valor em branco cai para `/api` |
-| `VITE_PROXY_TARGET` | `http://localhost:3000` | Destino do proxy `/api` no `vite.config.ts` |
+| `VITE_PROXY_TARGET` | `http://localhost:3000` | Destino do proxy `/api` no `vite.config.ts`; utilizado somente em desenvolvimento, não é necessário no Vercel |
 | `VITE_PORT` | `5173` | Porta do Vite em desenvolvimento |
 | `VITE_PREVIEW_PORT` | `4173` | Porta do `vite preview` |
 
@@ -372,6 +369,7 @@ Versão mobile:
 | --- | --- | --- |
 | `[EADDRINUSE]` na 5173 | Outro Vite já usa a porta | Defina `VITE_PORT` no `.env` ou use `--port`; configure `E2E_FRONTEND_URL` se for E2E |
 | `/api` retorna 404/502 | Backend não está rodando | Inicie o backend e confira `VITE_PROXY_TARGET` |
+| `/api` falha no Vercel | Rewrite ausente/incorreto ou API indisponível | Confira `frontend/vercel.json` e o healthcheck pelo domínio do frontend |
 | `ECONNREFUSED` no Vite | Porta do backend diferente | Ajuste `VITE_PROXY_TARGET` e reinicie `npm run dev` |
 | Login funciona, lista falha | Sessão revogada/expirada | Faça login novamente; o app limpa a sessão em 401 |
 | `403` ao salvar ou excluir | CSRF ausente/desatualizado | Recarregue a página e tente novamente |
@@ -407,26 +405,88 @@ abrir Swagger e executar `GET /api/recipes`.
 
 ## 20. Deploy na Vercel
 
-O projeto Vercel do frontend usa **Root Directory = `frontend/`**, framework Vite e
-`VITE_API_URL=/api`. O arquivo `vercel.json` contém dois papéis:
+O frontend está publicado em:
 
-1. rewrites `/api` e `/api/:path*` para o backend público;
-2. fallback SPA de qualquer outra rota para `/index.html`.
+**[Meu Caderno de Receitas — produção](https://rg-receitas-culinarias-oai3.vercel.app/login)**
 
-O destino do rewrite está marcado com `__BACKEND_VERCEL_HOST__` (somente o host, sem `https://`).
-**Não substitua esse placeholder por um domínio inventado.** Após criar o projeto de backend e
-obter a URL real de produção, preencha o secret `PROD_BACKEND_URL` com a URL HTTPS completa; o
-workflow `.github/workflows/production.yml` extrai o host e substitui o placeholder no runner antes
-do build. Para um deploy manual fora do workflow, faça a substituição localmente e não commite o
-resultado com o domínio real.
+O backend está publicado em [rg-receitas-culinarias.vercel.app](https://rg-receitas-culinarias.vercel.app/api/health)
+e utiliza o TiDB Cloud Starter com TLS verificado.
 
-Como o navegador continua chamando `/api` no mesmo domínio da SPA, os cookies `HttpOnly` com
-`Path=/api` e sem `Domain` são enviados normalmente. A origem pública da SPA deve constar em
-`CORS_ORIGIN` no backend, e `COOKIE_SECURE=true` é obrigatório em HTTPS.
+### 20.1. Configuração do projeto
 
-Publicações de frontend não criam nem migram banco. Use as operações `deploy-frontend` ou
-`deploy-all` do workflow manual; somente `provision-database` e `migrate-database` tocam no TiDB
-Cloud.
+| Configuração Vercel | Valor |
+| --- | --- |
+| Repositório | `filipe-fragallo/RG-Receitas-Culinarias` |
+| Branch de produção | `main` |
+| Root Directory | `frontend/` |
+| Framework Preset | Vite |
+| Build Command | `npm run build` |
+| Output Directory | `dist` |
+| Variável `VITE_API_URL` | `/api` |
+
+O frontend utiliza a **integração GitHub–Vercel** para publicar alterações na
+`main`. As variáveis de ambiente são configuradas no projeto Vercel.
+`VITE_PROXY_TARGET` **não precisa ser configurada na Vercel**: ela serve
+somente ao proxy do `vite.config.ts` durante o desenvolvimento local.
+
+### 20.2. Proxy da API e sessões
+
+O arquivo `frontend/vercel.json` contém os rewrites reais:
+
+```json
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/api",
+      "destination": "https://rg-receitas-culinarias.vercel.app/api"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://rg-receitas-culinarias.vercel.app/api/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
+```
+
+As duas primeiras regras encaminham as chamadas `/api` para o backend.
+A terceira fornece o fallback de SPA para rotas como `/login`,
+`/register` e `/recipes/:id`.
+
+O navegador faz chamadas relativas para `/api`, usando o **domínio do
+frontend**. Isso permite que os cookies `HttpOnly` com `Path=/api`,
+sem `Domain` e com `Secure` em HTTPS, acompanhem as requisições
+sem exigir acesso direto ao host do backend.
+
+O backend deve permitir a origem
+`https://rg-receitas-culinarias-oai3.vercel.app` em `CORS_ORIGIN`.
+O endereço público da API não é um segredo: autenticação, autorização,
+cookies e CSRF são validados pelo servidor.
+
+### 20.3. Validação após publicar
+
+1. Acesse [o healthcheck pelo domínio do frontend](https://rg-receitas-culinarias-oai3.vercel.app/api/health): deve retornar `status: ok` e `database: up`.
+2. Abra [a tela de login](https://rg-receitas-culinarias-oai3.vercel.app/login) e cadastre um usuário.
+3. Faça login, atualize a página e confirme que a sessão continua ativa.
+4. Cadastre, pesquise, edite, imprima e exclua uma receita; finalize com logout.
+
+### 20.4. Workflow manual alternativo
+
+O repositório também possui `.github/workflows/production.yml`, com
+operações explícitas para provisionar, migrar e publicar. **O passo de
+publicação do frontend nesse workflow ainda pressupõe o antigo
+placeholder `__BACKEND_VERCEL_HOST__`** e deve ser atualizado antes
+de executar `deploy-frontend` ou `deploy-all`. O `vercel.json`
+atual já possui a URL real do backend e **não deve ser substituído
+automaticamente por um domínio inventado**.
+
+O fluxo de publicação atualmente utilizado é a integração direta
+GitHub–Vercel. Deploys do frontend não criam banco, não executam
+migrations e não alteram os dados existentes.
 
 ---
 
