@@ -4,11 +4,20 @@ import { useAuth } from '../../hooks/useAuth';
 import { PageLoader } from './PageLoader';
 
 export function ProtectedRoute() {
-  const { status } = useAuth();
+  const { status, retryRestore } = useAuth();
   const location = useLocation();
 
   if (status === 'loading') {
     return <PageLoader />;
+  }
+
+  if (status === 'error') {
+    return (
+      <PageLoader
+        label="Não foi possível verificar sua sessão. Confira sua conexão e tente novamente."
+        onRetry={retryRestore}
+      />
+    );
   }
 
   if (status === 'anonymous') {

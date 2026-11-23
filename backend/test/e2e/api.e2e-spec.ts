@@ -92,6 +92,7 @@ describe('API E2E (HTTP + MySQL + Swagger)', () => {
     expect(response.headers['x-content-type-options']).toBe('nosniff');
     expect(response.headers['access-control-allow-origin']).toBe('http://localhost:5173');
     expect(response.headers['access-control-allow-credentials']).toBe('true');
+    expect(response.headers['cache-control']).toBe('no-store');
   });
 
   it('publishes an OpenAPI contract based on cookies and CSRF', async () => {
@@ -126,6 +127,8 @@ describe('API E2E (HTTP + MySQL + Swagger)', () => {
       .set('X-CSRF-Token', session.csrfToken)
       .send({ name: 'Usuária E2E', login, password: PASSWORD, confirmPassword: PASSWORD })
       .expect(201);
+
+    expect(register.headers['cache-control']).toBe('no-store');
 
     const authBody = register.body as AuthBody;
     expect(authBody).not.toHaveProperty('accessToken');

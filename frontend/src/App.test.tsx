@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import App from './App';
 
-type TestStatus = 'authenticated' | 'anonymous';
+type TestStatus = 'authenticated' | 'anonymous' | 'error';
 
 const authState = vi.hoisted(() => ({
   status: 'anonymous' as TestStatus,
@@ -26,6 +26,7 @@ vi.mock('./hooks/useAuth', () => ({
     login: vi.fn(),
     register: vi.fn(),
     logout: vi.fn(),
+    retryRestore: vi.fn(),
   }),
 }));
 
@@ -64,6 +65,15 @@ describe('App routes', () => {
   beforeEach(() => {
     authState.status = 'authenticated';
   });
+
+  it.each(['/', '/login'])(
+    'shows an explicit retry instead of redirecting on restore error at %s',
+    (path) => {
+      renderAt(path, 'error');
+      expect(screen.getByText(/Não foi possível verificar sua sessão/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeInTheDocument();
+    },
+  );
 
   it('renders the recipe list at /', () => {
     renderAt('/');

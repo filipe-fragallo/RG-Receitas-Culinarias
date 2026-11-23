@@ -694,12 +694,11 @@ O arquivo `.github/workflows/production.yml` oferece operações
 `provision-database`, `migrate-database`, `deploy-backend`,
 `deploy-frontend` e `deploy-all`, com confirmação explícita.
 
-**Atenção:** o passo `deploy-frontend` desse workflow ainda espera o antigo
-placeholder `__BACKEND_VERCEL_HOST__`, enquanto `frontend/vercel.json`
-já contém o endereço real da API. Portanto, **não execute
-`deploy-frontend` ou `deploy-all` pelo workflow sem primeiro atualizar
-esse passo**. A publicação atual do frontend é realizada pela integração
-GitHub–Vercel, não por esse workflow.
+O workflow utiliza os rewrites já definidos em `frontend/vercel.json`, sem
+substituir placeholders no runner. Para executar `deploy-frontend` ou
+`deploy-all`, configure previamente `VERCEL_TOKEN`, `VERCEL_ORG_ID` e os
+IDs dos projetos da Vercel como secrets do GitHub Actions. A publicação
+atual utiliza a integração direta GitHub–Vercel.
 
 As operações de banco exigem segredos próprios no GitHub Actions, host
 autorizado e permissões explícitas. Nenhuma publicação comum da API ou SPA

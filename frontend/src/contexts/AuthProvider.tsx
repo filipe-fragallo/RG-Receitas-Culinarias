@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-import { clearCsrfToken, removeLegacyToken, SESSION_EXPIRED_EVENT } from '../api/client';
+import { ApiError, clearCsrfToken, removeLegacyToken, SESSION_EXPIRED_EVENT } from '../api/client';
 import { authApi } from '../api/services';
 import { useToast } from '../hooks/useToast';
 import type { LoginInput, RegisterInput, User } from '../types/api';
@@ -13,6 +13,7 @@ function firstName(name: string | null | undefined): string {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [user, setUser] = useState<User | null>(null);
+  const [restoreAttempt, setRestoreAttempt] = useState(0);
   const toast = useToast();
   const isLoggingOut = useRef(false);
   const isAuthRequestInFlight = useRef(false);
@@ -22,6 +23,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearCsrfToken();
     setUser(null);
     setStatus('anonymous');
+  }, []);
+
+  const retryRestore = useCallback(() => {
+    setStatus('loading');
+    setRestoreAttempt((attempt) => attempt + 1);
   }, []);
 
   useEffect(() => {
@@ -38,11 +44,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(currentUser);
           setStatus('authenticated');
         }
-      } catch {
+      } catch (error) {
         if (!active) return;
-        clearSession();
-        if (hadLegacyToken) {
-          toast.info('Sua sessão anterior foi encerrada. Entre novamente para continuar.');
+
+        // Uma resposta 401 comprova ausência/expiração da sessão.
+        // Falhas de rede ou 5xx não invalidam o cookie: oferecemos retry.
+        if (error instanceof ApiError && error.status === 401) {
+          clearSession();
+          if (hadLegacyToken) {
+            toast.info('Sua sessão anterior foi encerrada. Entre novamente para continuar.');
+          }
+        } else {
+          setStatus('error');
         }
       }
     };
@@ -52,7 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, [clearSession, toast]);
+  }, [clearSession, toast, restoreAttempt]);
 
   useEffect(() => {
     const handleSessionExpired = () => {
@@ -125,8 +138,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearSession, toast]);
 
   const value = useMemo(
-    () => ({ status, user, login, register, logout }),
-    [status, user, login, register, logout],
+    () => ({ status, user, login, register, logout, retryRestore }),
+    [status, user, login, register, logout, retryRestore],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -49,6 +49,7 @@ describe('RegisterPage', () => {
       login: vi.fn(),
       register: registerMock,
       logout: vi.fn(),
+      retryRestore: vi.fn(),
     });
   });
 

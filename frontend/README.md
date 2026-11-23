@@ -477,12 +477,10 @@ cookies e CSRF são validados pelo servidor.
 ### 20.4. Workflow manual alternativo
 
 O repositório também possui `.github/workflows/production.yml`, com
-operações explícitas para provisionar, migrar e publicar. **O passo de
-publicação do frontend nesse workflow ainda pressupõe o antigo
-placeholder `__BACKEND_VERCEL_HOST__`** e deve ser atualizado antes
-de executar `deploy-frontend` ou `deploy-all`. O `vercel.json`
-atual já possui a URL real do backend e **não deve ser substituído
-automaticamente por um domínio inventado**.
+operações explícitas para provisionar, migrar e publicar. O passo antigo
+de substituição de `__BACKEND_VERCEL_HOST__` foi removido: o
+`frontend/vercel.json` contém a URL estável do backend. O workflow
+manual exige os secrets de publicação no GitHub Actions antes de ser usado.
 
 O fluxo de publicação atualmente utilizado é a integração direta
 GitHub–Vercel. Deploys do frontend não criam banco, não executam
