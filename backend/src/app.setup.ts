@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import type { NextFunction, Request, Response } from 'express';
 
 import { getAllowedOrigins } from './config/app-origins';
 
@@ -22,6 +23,13 @@ export function configureApp(app: INestApplication): void {
   }
 
   app.use(cookieParser());
+
+  // Impede armazenamento de respostas privadas por caches intermediários,
+  // incluindo rotas de autenticação, receitas e respostas de erro.
+  app.use('/api', (_request: Request, response: Response, next: NextFunction) => {
+    response.setHeader('Cache-Control', 'no-store');
+    next();
+  });
 
   app.use(
     helmet({
