@@ -47,6 +47,7 @@ describe('LoginPage', () => {
       login: loginMock,
       register: vi.fn(),
       logout: vi.fn(),
+      retryRestore: vi.fn(),
     });
   });
 
