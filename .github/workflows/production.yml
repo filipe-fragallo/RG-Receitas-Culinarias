@@ -36,7 +36,6 @@ jobs:
       PROD_DB_PASSWORD: ${{ secrets.PROD_DB_PASSWORD }}
       PROD_DB_NAME: ${{ secrets.PROD_DB_NAME }}
       PROD_DB_SSL_CA: ${{ secrets.PROD_DB_SSL_CA }}
-      PROD_BACKEND_URL: ${{ secrets.PROD_BACKEND_URL }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID_BACKEND: ${{ secrets.VERCEL_PROJECT_ID_BACKEND }}
@@ -127,32 +126,8 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Resolve URL do backend no rewrite do frontend
-        if: ${{ contains(fromJSON('["deploy-frontend","deploy-all"]'), inputs.operation) }}
-        working-directory: frontend
-        env:
-          BACKEND_URL: ${{ secrets.PROD_BACKEND_URL }}
-        run: |
-          node -e '
-            const fs = require("node:fs");
-            const raw = process.env.BACKEND_URL || "";
-            let url;
-            try {
-              url = new URL(raw);
-            } catch {
-              throw new Error("BACKEND_URL deve ser a URL HTTPS do backend já publicado");
-            }
-            if (url.protocol !== "https:") {
-              throw new Error("BACKEND_URL deve usar HTTPS");
-            }
-            const file = "vercel.json";
-            const content = fs.readFileSync(file, "utf8");
-            const placeholder = "__BACKEND_VERCEL_HOST__";
-            if (!content.includes(placeholder)) {
-              throw new Error("vercel.json não contém o placeholder do backend");
-            }
-            fs.writeFileSync(file, content.replaceAll(placeholder, url.host));
-          '
+      # Os rewrites do frontend/vercel.json já apontam para o domínio estável
+      # do backend. Não é necessário substituir placeholder no runner.
 
       - name: Publica frontend na Vercel
         if: ${{ contains(fromJSON('["deploy-frontend","deploy-all"]'), inputs.operation) }}
