@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SESSION_EXPIRED_EVENT } from '../api/client';
+import { ApiError, SESSION_EXPIRED_EVENT } from '../api/client';
 import { authApi } from '../api/services';
 import { useAuth } from '../hooks/useAuth';
 import { AuthProvider } from './AuthProvider';
@@ -42,6 +42,9 @@ function Probe() {
       <button type="button" onClick={() => void auth.logout()}>
         Sair
       </button>
+      <button type="button" onClick={auth.retryRestore}>
+        Tentar novamente
+      </button>
     </div>
   );
 }
@@ -58,7 +61,7 @@ const renderProvider = () =>
 describe('AuthProvider', () => {
   beforeEach(() => {
     window.localStorage.clear();
-    mockAuthApi.me.mockReset().mockRejectedValue(new Error('401'));
+    mockAuthApi.me.mockReset().mockRejectedValue(new ApiError(401, 'Sessão não informada'));
     mockAuthApi.login.mockReset();
     mockAuthApi.register.mockReset();
     mockAuthApi.logout.mockReset();
@@ -71,6 +74,27 @@ describe('AuthProvider', () => {
     expect(screen.getByTestId('status')).toHaveTextContent('anonymous');
     expect(screen.queryByText(/Sua sessão expirou/)).not.toBeInTheDocument();
   });
+
+  it.each([0, 500])(
+    'preserves the session on restore failure %i and allows retry',
+    async (statusCode) => {
+      mockAuthApi.me
+        .mockRejectedValueOnce(new ApiError(statusCode, 'Servidor temporariamente indisponível'))
+        .mockResolvedValueOnce(user);
+
+      renderProvider();
+      await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('error'));
+      expect(screen.getByTestId('login')).toHaveTextContent('-');
+
+      await userEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
+
+      await waitFor(() =>
+        expect(screen.getByTestId('status')).toHaveTextContent('authenticated'),
+      );
+      expect(screen.getByTestId('login')).toHaveTextContent('maria');
+      expect(mockAuthApi.me).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it('migrates the legacy token by removing only its own key', async () => {
     window.localStorage.setItem('meu-caderno:token', 'jwt-antigo');
