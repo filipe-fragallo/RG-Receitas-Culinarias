@@ -119,7 +119,7 @@ Os projetos possuem comandos independentes:
 - **API/proxy:** `frontend/vercel.json` redireciona `/api` ao domínio real do backend.
 - **Deploy:** integração dos projetos Vercel com a branch `main` do GitHub.
 
-O runtime do backend **não executa migrations automaticamente**. Alterações futuras no banco exigem uma etapa explícita e autorizada, antes da publicação da versão que depende delas. O arquivo [`.github/workflows/production.yml`](.github/workflows/production.yml) contém um workflow manual; suas etapas de publicação do frontend ainda pressupõem o placeholder antigo do proxy e devem ser ajustadas antes de serem utilizadas. O deploy atual utiliza a integração GitHub–Vercel.
+O runtime do backend **não executa migrations automaticamente**. Alterações futuras no banco exigem uma etapa explícita e autorizada, antes da publicação da versão que depende delas. O arquivo [`.github/workflows/production.yml`](.github/workflows/production.yml) contém um workflow manual alternativo. O passo antigo de substituição de placeholder foi removido, pois `frontend/vercel.json` já aponta para o domínio estável da API. O deploy atual utiliza a integração GitHub–Vercel; para usar o workflow manual, configure antes os secrets de publicação.
 
 **Segredos:** `.env`, `DB_PASSWORD`, `JWT_SECRET` e certificados/configurações privadas pertencem apenas ao ambiente apropriado. Use os arquivos `.env.example` como referência, sem versionar credenciais.
 
