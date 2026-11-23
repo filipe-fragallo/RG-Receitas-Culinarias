@@ -62,6 +62,7 @@ describe('RecipesPage', () => {
       login: vi.fn(),
       register: vi.fn(),
       logout: vi.fn(),
+      retryRestore: vi.fn(),
     });
     mockCategoriesApi.list.mockReset().mockResolvedValue([
       { id: 1, name: 'Bolos e tortas doces' },
