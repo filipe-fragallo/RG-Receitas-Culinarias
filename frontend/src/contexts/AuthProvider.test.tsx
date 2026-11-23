@@ -88,9 +88,7 @@ describe('AuthProvider', () => {
 
       await userEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
 
-      await waitFor(() =>
-        expect(screen.getByTestId('status')).toHaveTextContent('authenticated'),
-      );
+      await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('authenticated'));
       expect(screen.getByTestId('login')).toHaveTextContent('maria');
       expect(mockAuthApi.me).toHaveBeenCalledTimes(2);
     },
